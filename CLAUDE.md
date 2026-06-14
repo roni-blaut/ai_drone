@@ -36,18 +36,27 @@ PID oscillation detected in FRED sequence 7:
 ## Project files
 
 ```
-ai_drone/
+ai_drone/                              ← git root (this folder)
 ├── CLAUDE.md                          ← this file
+├── 2506.05163v1.pdf                   ← FRED paper (reference)
+├── fred_step1_download.py             ← HuggingFace download (simplified pipeline)
+├── fred_step2_convert.py              ← convert FRED annotations → YOLO format
+├── fred_step3_train.py                ← train YOLO11n (simplified pipeline)
+├── fred_step4_detect.py               ← run inference (simplified pipeline)
+├── pid_annotation_fft.py              ← PID frequency analysis on annotation centroids
+├── pid_annotation_fft.png             ← FFT output (9.14 Hz PID peak)
 ├── data_from_fred/                    ← FRED dataset sequences
-│   ├── 7/                             ← sequence 7 data
-│   │   ├── Event/events.raw           ← 127MB Prophesee EVT3 raw stream
-│   │   ├── coordinates.txt            ← 3007 ground truth bbox annotations
-│   │   ├── interpolated_coordinates.txt ← smoother float bboxes (preferred)
-│   │   ├── Event/Frames/              ← pre-extracted 33ms PNGs (Pipeline 1)
-│   │   ├── Event_YOLO/                ← YOLO labels for event frames
-│   │   ├── PADDED_RGB/                ← padded RGB frames (Pipeline 2)
-│   │   └── RGB_YOLO/                  ← YOLO labels for RGB frames
-│   └── 4/                             ← sequence 4 data (same structure)
+│   └── 7/                             ← sequence 7 data
+│       ├── Event/events.raw           ← 127MB Prophesee EVT3 raw stream
+│       ├── Event/Frames/              ← pre-extracted 33ms PNGs (Pipeline 1)
+│       ├── Event_YOLO/                ← YOLO labels for event frames
+│       ├── PADDED_RGB/                ← padded RGB frames (Pipeline 2)
+│       ├── RGB/                       ← raw RGB frames
+│       ├── RGB_YOLO/                  ← YOLO labels for RGB frames
+│       ├── Removed_frames/            ← frames excluded from dataset
+│       ├── coordinates.txt            ← 3007 ground truth bbox annotations
+│       ├── interpolated_coordinates.txt ← smoother float bboxes (preferred)
+│       └── tracks.txt                 ← drone track metadata
 ├── Fred/                              ← Pipelines 1 & 2 (paper baseline)
 │   ├── build_dataset.py               ← copy frames + labels into YOLO layout
 │   ├── train.py                       ← standard YOLO11n, no channel patch
@@ -63,7 +72,18 @@ ai_drone/
     ├── sync_check.py                  ← verify event↔RGB sync with bbox overlay
     ├── raw_to_movie.py                ← compare events.raw vs Event/Frames/ video
     ├── verify_frames.py               ← pixel-level alignment check (MAE)
-    └── colab_run.ipynb                ← Google Colab notebook (T4 GPU)
+    ├── colab_run.ipynb                ← Google Colab notebook (T4 GPU)
+    ├── debug_filter_preview.py        ← visualize noise filter effects
+    ├── find_offset.py                 ← find time offset between event/RGB streams
+    ├── inspect_raw.py                 ← inspect EVT3 raw file contents
+    ├── make_filter_movie.py           ← render filter comparison video
+    ├── view_raw_events.py             ← live viewer for raw event stream
+    ├── runs/detect/                   ← inference output (bounding box overlays)
+    ├── CODE_GUIDE.md                  ← developer guide for 4-channel pipeline
+    ├── EVT3_READER_FIXES.md           ← EVT3 parser bug history
+    ├── FRED_EventCamera_Discussion.md ← research discussion notes
+    ├── flow_chart.md                  ← pipeline flow diagram
+    └── README.md                      ← project overview
 ```
 
 ## Dataset format
@@ -90,9 +110,19 @@ Or permanently: `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_de
 
 ## Here's the complete run order for all 3
 
+### Pipeline 0 — HuggingFace simplified (download → train → detect)
+```powershell
+# Run from c:\ai_drone
+python fred_step1_download.py         # download FRED from HuggingFace
+python fred_step2_convert.py          # convert annotations to YOLO format
+$env:KMP_DUPLICATE_LIB_OK="TRUE"
+python fred_step3_train.py            # train YOLO11n
+python fred_step4_detect.py           # run inference
+```
+
 ### Pipeline 1 — FRED event baseline (target: 87.68% mAP50)
 ```powershell
-cd ai_drone\Fred
+cd Fred
 python build_dataset.py
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py
@@ -101,7 +131,7 @@ python evaluate.py
 
 ### Pipeline 2 — FRED RGB baseline (target: 76.23% mAP50)
 ```powershell
-cd ai_drone\Fred
+cd Fred
 python build_dataset.py --mode rgb
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
@@ -110,7 +140,7 @@ python evaluate.py --mode rgb
 
 ### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
 ```powershell
-cd ai_drone\4channel_project
+cd 4channel_project
 python dataset_builder.py
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train_4ch_yolo.py    # auto-resumes from last.pt if interrupted
@@ -119,7 +149,7 @@ python evaluate.py
 
 ### Data sync check (Event ↔ RGB bounding boxes)
 ```powershell
-cd ai_drone\4channel_project
+cd 4channel_project
 python sync_check.py                  # full sequence, auto-play at 5 fps
 python sync_check.py --start 9.8     # jump to drone segment
 python sync_check.py --save sync.mp4 # save side-by-side video
@@ -128,6 +158,13 @@ LEFT panel (cyan box) = Event/Frames/ + Event_YOLO labels.
 RIGHT panel (orange box) = PADDED_RGB/ + RGB_YOLO labels.
 Console prints `ev_cx/cy`, `rgb_cx/cy`, `Δcx/Δcy` — near 0 = synced.
 Controls: SPACE=next  A=prev  D=+10  Q=quit
+
+### PID oscillation analysis
+```powershell
+# Run from c:\ai_drone
+python pid_annotation_fft.py          # FFT on annotation centroids → pid_annotation_fft.png
+```
+Detects PID wobble frequency in ground-truth bboxes. Confirmed result: 9.14 Hz peak, SNR=2.77× at t=9.9–35.2s in sequence 7.
 
 ### Google Colab (Pipeline 3 only, T4 GPU)
 1. Upload `ai_drone/` to Google Drive (keep folder structure)
