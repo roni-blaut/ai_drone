@@ -1,0 +1,26 @@
+name: drone_detect
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - numpy>=1.24.0
+  - scipy>=1.10.0
+  - matplotlib>=3.7.0
+  - pillow>=9.0.0
+  - tqdm>=4.65.0
+  - opencv              # correct conda-forge name (not opencv-python)
+
+  # ── PyTorch CPU only (no GPU on this machine) ────────────────────────────
+  - pytorch>=2.0.0
+  - torchvision>=0.15.0
+  - cpuonly
+
+  # ── pip packages (not available on conda) ──────────────────────────────────
+  - pip
+  - pip:
+    - ultralytics>=8.0.0
