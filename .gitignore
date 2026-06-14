@@ -6,8 +6,7 @@ data_from_fred/*
 __pycache__/
 *.pyc
 
-# Model weights & training outputs
-*.pt
+# Training outputs
 runs/
 
 # Editor & tool settings
