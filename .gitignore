@@ -1,4 +1,15 @@
 data_from_fred/*
 !data_from_fred/.gitkeep
 4channel_project/dataset/**
-FRED/**
+
+# Python
+__pycache__/
+*.pyc
+
+# Model weights & training outputs
+*.pt
+runs/
+
+# Editor & tool settings
+.vscode/
+.claude/

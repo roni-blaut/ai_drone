@@ -44,7 +44,18 @@ except ImportError:
 
 from ultralytics import YOLO
 
-model = YOLO('yolo11n.pt')
+last_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'last.pt')
+best_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'best.pt')
+
+if os.path.exists(last_pt):
+    print(f"Checkpoint found: {last_pt}")
+    print("Resuming training from last checkpoint...")
+    model = YOLO(last_pt)
+    resume = True
+else:
+    print("No checkpoint found — starting fresh training...")
+    model = YOLO('yolo11n.pt')
+    resume = False
 
 results = model.train(
     data     = YAML_PATH,
@@ -56,6 +67,7 @@ results = model.train(
     name     = RUN_NAME,
     exist_ok = True,
     patience = 20,
+    resume   = resume,
     verbose  = True,
 )
 
