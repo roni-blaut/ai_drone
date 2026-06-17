@@ -78,6 +78,7 @@ ai_drone/                              ← git root (this folder)
     ├── inspect_raw.py                 ← inspect EVT3 raw file contents
     ├── make_filter_movie.py           ← render filter comparison video
     ├── view_raw_events.py             ← live viewer for raw event stream
+    ├── raw_label_check.py             ← verify events.raw sync with Event_YOLO labels
     ├── runs/detect/                   ← inference output (bounding box overlays)
     ├── CODE_GUIDE.md                  ← developer guide for 4-channel pipeline
     ├── EVT3_READER_FIXES.md           ← EVT3 parser bug history
@@ -158,6 +159,25 @@ LEFT panel (cyan box) = Event/Frames/ + Event_YOLO labels.
 RIGHT panel (orange box) = PADDED_RGB/ + RGB_YOLO labels.
 Console prints `ev_cx/cy`, `rgb_cx/cy`, `Δcx/Δcy` — near 0 = synced.
 Controls: SPACE=next  A=prev  D=+10  Q=quit
+
+### Raw event data vs Event_YOLO label sync check
+```powershell
+cd 4channel_project
+python raw_label_check.py                  # full sequence 7
+python raw_label_check.py --start 9.8     # jump to drone segment
+python raw_label_check.py --seq 4         # sequence 4
+python raw_label_check.py --save out.mp4  # also save video
+```
+Renders frames live from `events.raw` (no pre-extracted PNGs) and overlays the
+matching `Event_YOLO/` bounding box by timestamp.
+- **CYAN box** = Event_YOLO label drawn on the raw event frame
+- **GREEN** banner = label timestamp matched (Δ shown in µs)
+- **ORANGE** banner = label file exists but empty (drone out of frame)
+- **RED** banner = no Event_YOLO file within ±16ms of this window
+Applies both EVT3 fixes automatically: 24-bit rollover (via EVT3Reader) and
+ts_shift clock offset (`raw_t - ts_shift_us` → Event_YOLO time).
+Console prints `cx cy w h` and timestamp delta for every frame.
+Controls: SPACE=pause  A/←=prev  D/→=+10  Q=quit
 
 ### PID oscillation analysis
 ```powershell
