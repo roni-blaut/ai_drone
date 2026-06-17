@@ -15,12 +15,13 @@ Usage:
     python verify_frames.py --start 0    # include countdown region
 """
 
-import sys, os, glob, argparse
+import sys, os, argparse
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from evt3_reader import EVT3Reader
 from config import IMG_W, IMG_H, WINDOW_US
+from zip_utils import init_sequence, seq_glob, seq_imread
 
 try:
     import cv2
@@ -40,6 +41,8 @@ BASE       = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', arg
 RAW_FILE   = os.path.join(BASE, 'Event', 'events.raw')
 FRAMES_DIR = os.path.join(BASE, 'Event', 'Frames')
 
+init_sequence(BASE)
+
 # ── Load ts_shift_us ──────────────────────────────────────────────────────────
 
 reader  = EVT3Reader(RAW_FILE)
@@ -50,7 +53,7 @@ print(f"Raw window:   raw_t = frames_t + {SKIP_US/1e6:.3f}s\n")
 # ── Load Frames/ index (numeric sort) ─────────────────────────────────────────
 
 all_pairs  = sorted([(int(os.path.basename(p).split('_frame_')[1][:-4]), p)
-                      for p in glob.glob(os.path.join(FRAMES_DIR, '*.png'))])
+                      for p in seq_glob(FRAMES_DIR, '*.png')])
 frame_ts   = np.array([t for t, _ in all_pairs], dtype=np.int64)
 frame_paths = [p for _, p in all_pairs]
 
@@ -89,7 +92,7 @@ for frames_t, frames_path in samples:
 
     evs   = reader.read_window(raw_t0, raw_t1)
     recon = reconstruct(evs)
-    orig  = cv2.imread(frames_path, cv2.IMREAD_GRAYSCALE)
+    orig  = seq_imread(frames_path, cv2.IMREAD_GRAYSCALE)
     mae   = float(np.mean(np.abs(recon.astype(int) - orig.astype(int))))
     maes.append(mae)
 

@@ -28,6 +28,7 @@ import glob
 import numpy as np
 import random
 from PIL import Image
+from zip_utils import seq_open_lines
 from config import (
     RAW_FILE, COORDS_FILE, DATASET_DIR,
     IMG_W, IMG_H, WINDOW_US,
@@ -49,8 +50,7 @@ def load_annotations(coords_file):
     We convert time to microseconds for alignment with event timestamps.
     """
     annotations = []
-    with open(coords_file, 'r') as f:
-        for line in f:
+    for line in seq_open_lines(coords_file):
             line = line.strip()
             if not line:
                 continue

@@ -28,7 +28,6 @@ Usage:
 
 import sys
 import os
-import glob
 import argparse
 import numpy as np
 
@@ -36,6 +35,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from evt3_reader import EVT3Reader
 from config import WINDOW_US, IMG_W, IMG_H, SEQUENCE_DIR, EVENT_YOLO_DIR
+from zip_utils import init_sequence, seq_glob, seq_exists, seq_open_lines
 
 try:
     import cv2
@@ -60,7 +60,8 @@ args = parser.parse_args()
 
 # Allow --seq to override paths
 if args.seq != '7':
-    _base       = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', args.seq)
+    _base = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', args.seq)
+    init_sequence(_base)
     RAW_FILE    = os.path.join(_base, 'Event', 'events.raw')
     EV_YOLO_DIR = os.path.join(_base, 'Event_YOLO')
 else:
@@ -68,7 +69,7 @@ else:
     EV_YOLO_DIR = EVENT_YOLO_DIR
 
 for path, label in [(RAW_FILE, 'events.raw'), (EV_YOLO_DIR, 'Event_YOLO/')]:
-    if not os.path.exists(path):
+    if not seq_exists(path):
         print(f"ERROR: {label} not found:\n  {path}")
         sys.exit(1)
 
@@ -82,16 +83,15 @@ def _parse_ts(path):
 def load_boxes(path):
     """Return list of (cx, cy, w, h) from a YOLO label file."""
     boxes = []
-    if os.path.exists(path) and os.path.getsize(path) > 0:
-        with open(path) as f:
-            for line in f:
-                v = line.strip().split()
-                if len(v) == 5:
-                    boxes.append(tuple(float(x) for x in v[1:]))
+    if seq_exists(path):
+        for line in seq_open_lines(path):
+            v = line.strip().split()
+            if len(v) == 5:
+                boxes.append(tuple(float(x) for x in v[1:]))
     return boxes
 
 yolo_index = {}   # ts_us (int) → file path
-for f in glob.glob(os.path.join(EV_YOLO_DIR, '*.txt')):
+for f in seq_glob(EV_YOLO_DIR, '*.txt'):
     try:
         yolo_index[_parse_ts(f)] = f
     except (IndexError, ValueError):
