@@ -21,19 +21,28 @@ No channel is redundant. Each carries independent physical information.
 
 ```
 4channel_project/
-├── config.py           ← All settings (paths, parameters)
-├── evt3_reader.py      ← Parse Prophesee EVT3 raw binary file
+├── config.py           ← All settings; calls init_sequence() on import
+├── zip_utils.py        ← Transparent zip/folder access (seq_glob, seq_imread…)
+├── evt3_reader.py      ← Parse Prophesee EVT3 binary (zip-aware via BytesIO)
 ├── filters.py          ← Refractory + BAF noise filters
 ├── channels.py         ← Generate 4 channels from filtered events
-├── dataset_builder.py  ← Build YOLO training dataset
+├── dataset_builder.py  ← Build YOLO dataset (multi-sequence from splits.yaml)
+├── make_catalog.py     ← Scan data_from_fred/*.zip → write catalog.yaml
 ├── train_4ch_yolo.py   ← Train YOLO with modified 4-channel input
 ├── evaluate.py         ← Evaluate and compare vs paper baseline
 ├── sync_check.py       ← Verify event↔RGB sync with side-by-side bbox overlay
 ├── raw_to_movie.py     ← Compare events.raw reconstruction vs Event/Frames/ video
 ├── verify_frames.py    ← Pixel-level alignment check (MAE score)
+├── raw_label_check.py  ← Verify events.raw sync with Event_YOLO bounding boxes
 ├── environment.yml     ← conda environment (CPU PyTorch)
 ├── requirements.txt    ← pip requirements
 └── CODE_GUIDE.md       ← full function-by-function documentation
+
+data_from_fred/
+├── splits.yaml         ← which sequence numbers go to train / val / test
+├── catalog.yaml        ← auto-generated metadata for every zip (run make_catalog.py)
+├── 7.zip               ← sequence data (or extracted as 7/)
+└── 4.zip, 10.zip …     ← additional sequences (~100 total)
 ```
 
 ## Setup
@@ -48,10 +57,8 @@ Or with pip:
 pip install -r requirements.txt
 ```
 
-Make sure `config.py` has the correct path to your FRED folder 7:
-```python
-SEQUENCE_DIR = "../data_from_fred/7"   # adjust if needed
-```
+Data is read directly from `.zip` files — no extraction needed.
+`config.py` auto-detects zip vs extracted folder via `zip_utils.init_sequence()`.
 
 ### Windows — fix OpenMP conflict before training
 ```powershell
@@ -98,10 +105,17 @@ from RGB_YOLO). Console prints `Δcx`/`Δcy` per frame — near 0 means synced.
 Controls: SPACE / D = next,  A = prev,  D = jump +10,  Q = quit.
 
 ### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
-Our approach: reads `events.raw` directly, builds 4 physics-motivated channels.
+Our approach: reads `events.raw` directly from zip, builds 4 physics-motivated channels.
 ```powershell
-cd ai_drone\4channel_project
-python dataset_builder.py       # ~20-30 min, builds 4-ch RGBA PNG dataset
+cd c:\ai_drone
+
+# (First time or after adding zips) Generate sequence catalog:
+python 4channel_project/make_catalog.py
+
+# Edit data_from_fred/splits.yaml to assign sequences to train/val/test
+
+cd 4channel_project
+python dataset_builder.py       # reads splits.yaml, processes all assigned sequences
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train_4ch_yolo.py        # auto-resumes from last.pt if interrupted
 python evaluate.py              # compare vs 87.68% baseline
@@ -131,14 +145,23 @@ Expected output: 4 channel shapes + a preview PNG.
 
 ### Step 3 — Build training dataset
 ```powershell
-# Delete old dataset first if it exists (old format used .npy — no longer supported)
+# Delete old dataset first if rebuilding from scratch:
 Remove-Item -Recurse -Force dataset
 
+# (Optional) update catalog after adding new zips:
+python make_catalog.py
+
+# Build from all sequences in splits.yaml:
 python dataset_builder.py
 ```
-Reads `events.raw`, generates all 4 channels for every 33ms window,
-saves **4-channel RGBA PNG** files + YOLO labels. ~20-30 min for folder 7.
+Reads `events.raw` from each zip in `splits.yaml`, generates 4 channels per 33ms window,
+saves **4-channel RGBA PNG** files + YOLO labels into `dataset/images/` and `dataset/labels/`.
+Split membership recorded in `dataset/train.txt`, `val.txt`, `test.txt`.
 Writes `dataset.yaml` with `channels: 4` — Ultralytics reads this natively.
+
+Frame names: `s{seq_num}_{t_us:012d}.png` — unique across all sequences.
+
+Legacy single-sequence mode (seq 7 only): `python dataset_builder.py --single`
 
 ### Step 4 — Train
 ```powershell

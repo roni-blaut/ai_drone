@@ -7,10 +7,11 @@ flowchart TD
     A([START]) --> B
 
     %% ── INPUT ──────────────────────────────────────────
-    subgraph INPUT["INPUT FILES"]
-        B["7/Event/events.raw\n127MB · Prophesee EVT3 binary"]
-        C["7/coordinates.txt\nor interpolated_coordinates.txt\n3007 bbox annotations"]
-        D["7/Event/events.raw.tmp_index\nts_shift_us = 1,163,264 µs"]
+    subgraph INPUT["INPUT FILES (read from zip or folder)"]
+        B["N.zip → Event/events.raw\n127MB+ · Prophesee EVT3 binary\nloaded via zip_utils into BytesIO"]
+        C["N.zip → coordinates.txt\nor interpolated_coordinates.txt\nbbox annotations"]
+        D["N.zip → Event/events.raw.tmp_index\nts_shift_us (clock offset)"]
+        E2["data_from_fred/splits.yaml\ntrain:[4,7,10,31]  val:[52]  test:[]"]
     end
 
     %% ── STEP 1: EVT3 READER ────────────────────────────
@@ -76,12 +77,12 @@ flowchart TD
             Y1 & Y2 & Y3 & Y4 --> Y5["np.stack → shape (4, 720, 1280)\nfloat32 · range 0.0–1.0"]
         end
 
-        Y5 --> Z["determine split\nrandom() < 0.8 → train\nelse → val"]
+        Y5 --> Z["split from splits.yaml\ntrain / val / test\n(whole sequence → one split)"]
 
-        Z --> AA["Save 4-channel PNG\n(H,W,4) uint8 RGBA\nImage.fromarray(mode='RGBA')\ndataset/images/{split}/seq_t{t:012d}.png"]
+        Z --> AA["Save 4-channel PNG\n(H,W,4) uint8 RGBA\nImage.fromarray(mode='RGBA')\ndataset/images/s{seq}_{t:012d}.png"]
 
         AA --> AB{"annotation\nfound?"}
-        AB -->|"yes — drone visible"| AC["convert bbox → YOLO format\ncx,cy,w,h normalized 0–1\nwrite: 0 cx cy w h\ndataset/labels/{split}/seq_t{t:012d}.txt"]
+        AB -->|"yes — drone visible"| AC["convert bbox → YOLO format\ncx,cy,w,h normalized 0–1\nwrite: 0 cx cy w h\ndataset/labels/s{seq}_{t:012d}.txt"]
         AB -->|"no — empty sky"| AD["write empty .txt\n= valid negative example\n(no drone in this window)"]
 
         AC & AD --> AE["next window →"]
@@ -90,8 +91,8 @@ flowchart TD
 
     %% ── STEP 5: DATASET YAML ───────────────────────────
     subgraph YAML["STEP 5 · Dataset Output"]
-        AF["dataset/\n├── images/train/  ← ~370 4-ch PNGs\n├── images/val/    ← ~94 4-ch PNGs\n├── labels/train/  ← YOLO .txt files\n├── labels/val/\n└── dataset.yaml"]
-        AG["dataset.yaml\nchannels: 4  ← tells YOLO to expect 4 channels\nnc: 1\nnames: ['drone']"]
+        AF["dataset/\n├── images/        ← all 4-ch PNGs, flat\n├── labels/        ← YOLO .txt files, flat\n├── train.txt      ← paths of train images\n├── val.txt        ← paths of val images\n├── test.txt\n└── dataset.yaml"]
+        AG["dataset.yaml\ntrain: train.txt  val: val.txt  test: test.txt\nchannels: 4  ← tells YOLO to expect 4 channels\nnc: 1  names: ['drone']\nSplit membership set by data_from_fred/splits.yaml"]
     end
 
     AA --> AF
@@ -145,8 +146,9 @@ flowchart TD
 | **Dataset frames** | **~3,100** | used for training |
 | With drone (positive) | ~2,700 | bbox annotation present |
 | Empty sky (negative) | ~400 | valid negative examples |
-| Train split (80%) | ~2,480 | |
-| Val split (20%) | ~620 | |
+
+In multi-sequence mode the split is per-zip (set in `splits.yaml`), not per-frame.
+With 5 current zips (seqs 4,7,10,31 → train; 52 → val), total frames scale ~5×.
 
 ---
 

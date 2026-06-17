@@ -12,28 +12,32 @@ https://github.com/miccunifi/FRED/tree/main
 ## Pipeline Overview
 
 ```
-events.raw (127MB raw binary)
-      │
-      ▼
-evt3_reader.py       ← parse binary → structured event array (x, y, t, polarity)
-      │
-      ▼
-filters.py           ← remove noise → clean event array
-      │
-      ▼
-channels.py          ← generate 4 channels → numpy array (4, 720, 1280)
-      │
-      ▼
-dataset_builder.py   ← save 4-ch RGBA PNG + YOLO labels → train/val folders
-      │
-      ▼
-train_4ch_yolo.py    ← patch YOLO first layer → train → best.pt
-      │
-      ▼
-evaluate.py          ← mAP50 vs paper baseline + ablation study
+data_from_fred/splits.yaml    data_from_fred/N.zip (or folder N/)
+        │                              │
+        │                      zip_utils.py  ← transparent zip/folder access
+        │                              │
+        ▼                              ▼
+dataset_builder.py            evt3_reader.py  ← parse EVT3 binary (zip-aware)
+(multi-sequence loop)                 │
+        │                      filters.py     ← noise removal
+        │                             │
+        │                      channels.py    ← 4-channel generator
+        │                             │
+        ▼                             ▼
+dataset/images/*.png   ← 4-ch RGBA PNG (frame named s{seq}_{t_us:012d})
+dataset/labels/*.txt   ← YOLO bbox label
+dataset/train.txt      ← paths of train images (whole sequences)
+dataset/val.txt        ← paths of val images
+        │
+        ▼
+train_4ch_yolo.py      ← patch YOLO first layer → train → best.pt
+        │
+        ▼
+evaluate.py            ← mAP50 vs paper baseline + ablation study
 ```
 
-All settings live in `config.py`. No other file needs path changes.
+All paths live in `config.py`. `zip_utils.init_sequence()` is called there on
+import — all downstream scripts get transparent zip access automatically.
 
 ---
 
@@ -77,9 +81,58 @@ Sets paths and training parameters accordingly:
 
 ---
 
+## zip_utils.py
+
+**Purpose:** Transparent access to FRED sequence data from `.zip` files or extracted folders.
+All scripts use the `seq_*` helpers instead of raw `glob`/`open`/`cv2.imread` calls.
+
+### Module-level state
+
+`_ACTIVE_SEQ` — module-level `ZipSequence` instance (or `None` for real filesystem).
+Set by `init_sequence()`. All `seq_*` helpers check this automatically.
+
+### Function: `init_sequence(seq_dir)`
+
+Call once with the sequence directory (e.g. `../data_from_fred/7`).
+- If `seq_dir` exists as a folder → uses real filesystem (`_ACTIVE_SEQ = None`)
+- If `seq_dir` doesn't exist but `seq_dir + '.zip'` does → opens `ZipSequence`
+- Calling again with the same zip is a no-op (zip stays open)
+
+Called automatically by `config.py` on import for the default sequence.
+Scripts with `--seq` flag call it again after `args = parser.parse_args()`.
+
+### Helper functions
+
+| Function | Replaces | Notes |
+|---|---|---|
+| `seq_glob(dir, pattern)` | `glob.glob(os.path.join(dir, pattern))` | returns fake filesystem paths |
+| `seq_imread(path, flags)` | `cv2.imread(path, flags)` | decodes image from zip on demand |
+| `seq_open_lines(path)` | `open(path).readlines()` | returns list of lines from zip member |
+| `seq_open_binary(path)` | `open(path, 'rb')` | returns `io.BytesIO` (seekable) |
+| `seq_exists(path)` | `os.path.exists(path)` | also checks virtual directories in zip |
+
+All helpers fall back to real filesystem if the file exists on disk.
+
+### Class: `ZipSequence`
+
+Wraps `zipfile.ZipFile`. Key method: `_to_member(path)` converts an absolute
+filesystem path back to a zip member name using `os.path.relpath`.
+
+`ts_shift_us` is read from `Event/events.raw.tmp_index` inside the zip during `__init__`.
+
+---
+
 ## evt3_reader.py
 
 **Purpose:** Parse the Prophesee EVT3 binary format into a structured numpy array of events.
+Supports both real filesystem and zip mode (via `zip_utils._ACTIVE_SEQ`).
+
+### Zip-aware initialization
+
+In `__init__`, if `zip_utils._ACTIVE_SEQ` is set and the file doesn't exist on disk:
+- Loads entire `events.raw` into `io.BytesIO` (seekable, ~127 MB RAM)
+- Gets `ts_shift_us` from `_ACTIVE_SEQ.ts_shift_us` (already parsed from zip index)
+- All subsequent reads use `self._bio` instead of opening the file
 
 ### EVT3 format recap
 
@@ -120,13 +173,21 @@ Each event is reconstructed by combining the most recent ADDR_Y, ADDR_X, and tim
 - Used by `dataset_builder.py` to process the whole file efficiently
 - Maintains a buffer across chunks so no events are missed at boundaries
 
+**`_get_file()`**
+- Returns `self._bio` (zip mode) or opens `self.filepath` (disk mode)
+- Used by `_find_header_end()` and `read_header()` for transparent access
+
 **`_find_header_end()`**
-- Internal: scans file for end of ASCII header (lines starting with `%`)
+- Scans file for end of ASCII header (lines starting with `%`)
 - Returns byte offset where binary data begins
+- Uses `_get_file()` — works in both zip and disk mode
 
 **`_iter_chunks()`**
-- Internal generator: reads file in chunks and decodes EVT3 words
-- Maintains decoder state (current_y, time_high, current_t) across chunks
+- Dispatches to `_stream_chunks(self._bio)` (zip) or `_stream_chunks(f)` (disk)
+
+**`_stream_chunks(f)`**
+- Inner EVT3 decode loop — reads 16-bit words from file-like object `f`
+- Maintains decoder state (current_y, time_high, rollover_offset) across chunks
 - Yields structured event arrays one chunk at a time
 
 ### Output format
@@ -307,93 +368,104 @@ Returns BGR image for OpenCV display/save.
 
 ## dataset_builder.py
 
-**Purpose:** Read the full `events.raw` file, generate 4 channels for every 33ms window, match with ground-truth annotations, and save as YOLO training data.
+**Purpose:** Read `events.raw` from one or more sequences, generate 4 channels per 33ms window, match annotations, save as YOLO training data.
 
-### Output structure
+### Output structure (multi-sequence mode, default)
 
 ```
 dataset/
-├── images/
-│   ├── train/   ← 4-channel RGBA PNG files (H×W×4, uint8)
-│   └── val/
-├── labels/
-│   ├── train/   ← YOLO format .txt files
-│   └── val/
-└── dataset.yaml ← includes "channels: 4"
+├── images/       ← all 4-channel RGBA PNGs, flat (no train/val subdirs)
+│   ├── s4_000009800000.png
+│   ├── s7_000009800000.png   (same timestamp, different seq → no collision)
+│   └── …
+├── labels/       ← YOLO .txt labels, flat
+│   └── …
+├── train.txt     ← absolute paths of train images (whole sequences per splits.yaml)
+├── val.txt       ← absolute paths of val images
+├── test.txt      ← absolute paths of test images (may be empty)
+└── dataset.yaml  ← channels: 4, references train.txt / val.txt / test.txt
 ```
 
-Images are saved as RGBA PNG (not .npy). Ultralytics reads `channels: 4` from
-`dataset.yaml` natively and routes 4-channel images through the network correctly.
+Frame naming: `s{seq_num}_{t_us:012d}.png` — globally unique across all sequences.
+
+### Function: `build_multi_sequence(splits_yaml, output_dir, window_us)`
+
+**Default entry point.** Reads `data_from_fred/splits.yaml`, calls `_process_sequence()`
+for each sequence in each split, writes `train.txt` / `val.txt` / `test.txt` index files,
+then writes `dataset.yaml` via `_write_yaml_multi()`.
+
+### Function: `_process_sequence(seq_num, raw_file, coords_file, output_dir, window_us)`
+
+Extracted inner loop — processes one sequence:
+1. Load annotations via `seq_open_lines()` (works from zip)
+2. Derive removed windows from annotation gaps
+3. Stream events via `EVT3Reader.iter_windows()`
+4. Per window: filter → generate channels → save PNG + label
+5. Returns list of absolute image paths for this sequence
+
+### Function: `_find_coords(seq_dir)`
+
+Returns `interpolated_coordinates.txt` if it exists in the zip/folder,
+otherwise `coordinates.txt`. Uses `seq_exists()`.
+
+### Function: `build_dataset(...)` *(legacy, single-sequence)*
+
+Random 80/20 per-frame split within sequence 7. Saves to `images/train/`, `images/val/`.
+Run with `python dataset_builder.py --single` to use this mode.
 
 ### Function: `load_annotations(coords_file)`
 
-Parses `coordinates.txt` into a sorted list of `(time_us, x1, y1, x2, y2)`.
-
-Converts annotation time from seconds to microseconds for alignment with event timestamps.
+Parses `coordinates.txt` (or `interpolated_coordinates.txt`) into a sorted list of
+`(time_us, x1, y1, x2, y2)`. Uses `seq_open_lines()` — works from zip.
 
 ### Function: `find_annotation(annotations, t_start_us, t_end_us, max_gap_us=100000)`
 
-For a given time window, finds the nearest annotation.
-
-Uses `np.searchsorted` for fast binary search across annotation timestamps.
-Returns `(x1, y1, x2, y2)` or `None` if no annotation within `max_gap_us` (100ms).
+Binary search (`np.searchsorted`) for nearest annotation to a window.
+Returns `(x1, y1, x2, y2)` or `None` if no annotation within `max_gap_us`.
 
 ### Function: `bbox_to_yolo(x1, y1, x2, y2)`
 
-Converts absolute pixel coordinates to YOLO normalized format:
+Absolute pixel coords → YOLO normalized `cx, cy, w, h` (clamped to [0,1]).
 
-```
-cx = ((x1 + x2) / 2) / img_width     # center x, normalized 0–1
-cy = ((y1 + y2) / 2) / img_height    # center y, normalized 0–1
-w  = (x2 - x1) / img_width           # width, normalized 0–1
-h  = (y2 - y1) / img_height          # height, normalized 0–1
-```
+### Function: `_write_yaml_multi(output_dir)`
 
-### Function: `build_dataset(...)`
-
-Main function. Iterates through every 33ms window in `events.raw`:
-
-```
-For each window (t_start, events):
-  1. Skip if no events
-  2. Find matching annotation (or note as negative example)
-  3. Apply fast_filter (refractory only)
-  4. Generate 4 channels → shape (4, 720, 1280) float32
-  5. Assign to train or val (random split, 80/20)
-  6. Save as RGBA PNG → images/train/ or images/val/
-     (channels transposed to (H, W, 4), scaled ×255, saved via PIL)
-  7. Save .txt label → labels/train/ or labels/val/
-```
-
-Each PNG is named `seq_t{timestamp}.png` so files sort in time order.
-Each `.txt` label has one line: `0 cx cy w h` (class 0 = drone).
-Empty `.txt` file = no drone in this frame.
-
-### Function: `print_dataset_stats(output_dir)`
-
-Prints summary after building:
-```
-train:  2400 images, 2200 with drone (92%)
-val  :   600 images,  550 with drone (92%)
-```
-
-### Function: `_write_yaml(output_dir)`
-
-Writes `dataset.yaml` that YOLO needs for training:
+Writes `dataset.yaml` using Ultralytics txt-path format:
 ```yaml
 path:  /absolute/path/to/dataset
-train: images/train
-val:   images/val
+train: train.txt
+val:   val.txt
+test:  test.txt
 channels: 4
 nc: 1
 names: ['drone']
 ```
 
-The `channels: 4` key is read by Ultralytics via:
-```python
-super().__init__(*args, channels=self.data.get("channels", 3), ...)
-```
-This sets the first Conv2d to 4 input channels without any manual patching.
+### Function: `print_dataset_stats(output_dir)`
+
+Auto-detects flat vs split-subdir layout. For flat (multi-sequence): counts
+lines in each `*.txt` index file. For legacy: counts files in `images/train/` etc.
+
+---
+
+## make_catalog.py
+
+**Purpose:** Scan `data_from_fred/*.zip`, read metadata from inside each zip, write
+`data_from_fred/catalog.yaml`. Run manually after adding new zips.
+
+### What it reads from each zip (via `ZipSequence`)
+
+- `ts_shift_us` — from `Event/events.raw.tmp_index` (already parsed by `ZipSequence._read_ts_shift`)
+- `n_event_frames` — count of `Event/Frames/*.png` members
+- `n_event_yolo` — count of `Event_YOLO/*.txt` members
+- `n_rgb_frames` — count of `PADDED_RGB/*.jpg` members
+- `zip_size_mb` — from `os.path.getsize`
+- `split` — looked up from `data_from_fred/splits.yaml`
+
+### Merge behaviour
+
+On re-run, existing `description` fields are **preserved** — only auto-generated
+fields are updated. Edit `description` manually in `catalog.yaml` to annotate
+what each sequence contains (lighting conditions, drone model, scenario, etc.).
 
 ---
 
@@ -592,6 +664,8 @@ runs/fred_4channel/
 | Old .npy dataset | `No images found` error | Delete `dataset/` folder and rerun `dataset_builder.py` |
 | Wrong channel count | Layer 0 shows `[3, 16, 3, 2]` | Ensure `channels: 4` in `dataset.yaml` and no old checkpoint loaded |
 | fbgemm.dll error | PyTorch DLL load failure | Install Visual C++ Redistributable from aka.ms/vs/17/release/vc_redist.x64.exe |
+| Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python dataset_builder.py` |
+| Sequence not found | `FileNotFoundError: Zip file not found` | Add `N.zip` to `data_from_fred/` or update `splits.yaml` |
 
 ---
 
