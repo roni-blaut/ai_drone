@@ -45,8 +45,12 @@ ai_drone/                              ← git root (this folder)
 ├── fred_step4_detect.py               ← run inference (simplified pipeline)
 ├── pid_annotation_fft.py              ← PID frequency analysis on annotation centroids
 ├── pid_annotation_fft.png             ← FFT output (9.14 Hz PID peak)
-├── data_from_fred/                    ← FRED dataset sequences
-│   └── 7/                             ← sequence 7 data
+├── data_from_fred/                    ← FRED dataset sequences (zip or extracted folders)
+│   ├── splits.yaml                    ← which sequence numbers go to train/val/test
+│   ├── catalog.yaml                   ← auto-generated metadata for every zip sequence
+│   ├── 7.zip                          ← sequence 7 (or extracted as 7/)
+│   ├── 4.zip, 10.zip, 31.zip, 52.zip ← additional sequences (~100 total planned)
+│   └── 7/                             ← example extracted layout (same as inside zip):
 │       ├── Event/events.raw           ← 127MB Prophesee EVT3 raw stream
 │       ├── Event/Frames/              ← pre-extracted 33ms PNGs (Pipeline 1)
 │       ├── Event_YOLO/                ← YOLO labels for event frames
@@ -54,19 +58,21 @@ ai_drone/                              ← git root (this folder)
 │       ├── RGB/                       ← raw RGB frames
 │       ├── RGB_YOLO/                  ← YOLO labels for RGB frames
 │       ├── Removed_frames/            ← frames excluded from dataset
-│       ├── coordinates.txt            ← 3007 ground truth bbox annotations
+│       ├── coordinates.txt            ← ground truth bbox annotations
 │       ├── interpolated_coordinates.txt ← smoother float bboxes (preferred)
 │       └── tracks.txt                 ← drone track metadata
 ├── Fred/                              ← Pipelines 1 & 2 (paper baseline)
-│   ├── build_dataset.py               ← copy frames + labels into YOLO layout
+│   ├── build_dataset.py               ← read frames+labels from zip → YOLO layout on disk
 │   ├── train.py                       ← standard YOLO11n, no channel patch
 │   └── evaluate.py                    ← compare vs paper mAP50
 └── 4channel_project/                  ← Pipeline 3 (our approach)
-    ├── config.py                      ← all settings (auto-detects Colab/local)
-    ├── evt3_reader.py                 ← EVT3 binary parser
+    ├── config.py                      ← all settings; calls init_sequence() on import
+    ├── zip_utils.py                   ← transparent zip/folder access (seq_glob, seq_imread…)
+    ├── evt3_reader.py                 ← EVT3 binary parser (zip-aware via BytesIO)
     ├── filters.py                     ← refractory + BAF noise filters
     ├── channels.py                    ← 4-channel generator
-    ├── dataset_builder.py             ← build YOLO training data from events.raw
+    ├── dataset_builder.py             ← build YOLO dataset from events.raw (multi-seq)
+    ├── make_catalog.py                ← scan all zips → write data_from_fred/catalog.yaml
     ├── train_4ch_yolo.py              ← train with 4-channel input
     ├── evaluate.py                    ← compare vs paper baseline
     ├── sync_check.py                  ← verify event↔RGB sync with bbox overlay
@@ -87,6 +93,38 @@ ai_drone/                              ← git root (this folder)
     └── README.md                      ← project overview
 ```
 
+## Zip file access — no extraction needed
+
+All scripts read FRED data directly from `.zip` files (`7.zip`, `4.zip`, etc.) via
+`zip_utils.py`. If a folder (e.g. `data_from_fred/7/`) exists on disk it is used instead,
+otherwise the matching `.zip` is opened transparently.
+
+`zip_utils.py` provides drop-in replacements:
+- `seq_glob(dir, pattern)` — like `glob.glob`
+- `seq_imread(path, flags)` — like `cv2.imread`
+- `seq_open_lines(path)` — like `open(path).readlines()`
+- `seq_exists(path)` — like `os.path.exists` (handles virtual directories in zips)
+- `init_sequence(seq_dir)` — call once; auto-detects zip vs folder
+
+`config.py` calls `init_sequence(SEQUENCE_DIR)` on import, so all tools that import
+`config` automatically get zip access for sequence 7.
+
+## Multi-sequence dataset (Pipeline 3)
+
+Sequences are assigned to splits via `data_from_fred/splits.yaml`:
+```yaml
+train: [4, 7, 10, 31]
+val:   [52]
+test:  []
+```
+Each zip is used as a whole unit for one split — no per-frame random splitting.
+
+Generated 4-channel PNGs go into `4channel_project/dataset/images/` (flat folder).
+Split membership is recorded in `dataset/train.txt`, `val.txt`, `test.txt`.
+`dataset/dataset.yaml` references these txt files (Ultralytics txt-path format).
+
+Frame naming: `s{seq_num}_{t_start_us:012d}.png` — globally unique across sequences.
+
 ## Dataset format
 
 - Pipeline 1 & 2: standard 3-channel PNG/JPG, `channels: 3` in dataset.yaml
@@ -105,7 +143,7 @@ Or permanently: `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_de
 ## Training status
 
 - Architecture confirmed: layer 0 is `[4, 16, 3, 2]` — 4 input channels ✓
-- Dataset: 2523 train images, 647 val images (from sequence 7)
+- Dataset: multi-sequence from splits.yaml (train: seqs 4,7,10,31 / val: seq 52)
 - Checkpoint system: auto-resumes from `runs/fred_4channel/weights/last.pt`
 - imread fix: patches `ultralytics.utils.patches.imread` + `ultralytics.data.base.imread`
 
@@ -124,7 +162,7 @@ python fred_step4_detect.py           # run inference
 ### Pipeline 1 — FRED event baseline (target: 87.68% mAP50)
 ```powershell
 cd Fred
-python build_dataset.py
+python build_dataset.py               # reads directly from zip, copies frames to disk
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py
 python evaluate.py
@@ -141,12 +179,34 @@ python evaluate.py --mode rgb
 
 ### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
 ```powershell
+cd c:\ai_drone
+
+# (First time or when adding new sequences) Update catalog:
+python 4channel_project/make_catalog.py   # writes data_from_fred/catalog.yaml
+
+# Edit data_from_fred/splits.yaml to assign sequences to train/val/test
+
 cd 4channel_project
-python dataset_builder.py
+python dataset_builder.py             # processes all sequences from splits.yaml
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
-python train_4ch_yolo.py    # auto-resumes from last.pt if interrupted
+python train_4ch_yolo.py              # auto-resumes from last.pt if interrupted
 python evaluate.py
 ```
+
+Single-sequence legacy mode (seq 7 only, random 80/20 split):
+```powershell
+python dataset_builder.py --single
+```
+
+### Sequence catalog
+```powershell
+# Run from c:\ai_drone
+python 4channel_project/make_catalog.py
+```
+Scans all `data_from_fred/*.zip`, reads metadata from inside each zip (ts_shift_us,
+frame counts, sizes), and writes `data_from_fred/catalog.yaml`.
+Re-running merges new data but preserves manually written `description` fields.
+Edit `catalog.yaml` to add descriptions like: `description: "indoor flight, low light"`.
 
 ### Data sync check (Event ↔ RGB bounding boxes)
 ```powershell
@@ -165,7 +225,7 @@ Controls: SPACE=next  A=prev  D=+10  Q=quit
 cd 4channel_project
 python raw_label_check.py                  # full sequence 7
 python raw_label_check.py --start 9.8     # jump to drone segment
-python raw_label_check.py --seq 4         # sequence 4
+python raw_label_check.py --seq 4         # sequence 4 (reads from 4.zip)
 python raw_label_check.py --save out.mp4  # also save video
 ```
 Renders frames live from `events.raw` (no pre-extracted PNGs) and overlays the
