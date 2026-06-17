@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from evt3_reader import EVT3Reader
 from config import IMG_W, IMG_H, WINDOW_US
+from zip_utils import init_sequence, seq_exists, seq_glob, seq_imread
 
 try:
     import cv2
@@ -46,7 +47,9 @@ BASE       = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', arg
 RAW_FILE   = os.path.join(BASE, 'Event', 'events.raw')
 FRAMES_DIR = os.path.join(BASE, 'Event', 'Frames')
 
-if not os.path.exists(RAW_FILE):
+init_sequence(BASE)
+
+if not seq_exists(RAW_FILE):
     print(f"ERROR: {RAW_FILE} not found"); sys.exit(1)
 
 t_start_us = int(args.start * 1e6) if args.start is not None else None
@@ -98,9 +101,8 @@ print("-" * 40)
 # Pre-index Frames/ timestamps — sort NUMERICALLY (not lexicographically)
 # Python sorted() compares strings char-by-char: '1' < '3' so "100000" < "33333"
 # We extract the number first, then sort by its integer value.
-import glob as _glob
 _all_pairs   = sorted([(int(os.path.basename(p).split('_frame_')[1][:-4]), p)
-                        for p in _glob.glob(os.path.join(FRAMES_DIR, '*.png'))])
+                        for p in seq_glob(FRAMES_DIR, '*.png')])
 _frame_ts    = np.array([t for t, _ in _all_pairs], dtype=np.int64)
 _frame_files = [p for _, p in _all_pairs]
 print(f"Frames/ index: {len(_frame_ts)} files  "
@@ -142,7 +144,7 @@ for t_start, evs in reader.iter_windows(WINDOW_US,
     orig_path, orig_ts = nearest_frame(frames_t + WINDOW_US)
     delta_ms = abs(orig_ts - frames_t) / 1000 if orig_ts else 9999
     if orig_path and delta_ms < 50:   # within 50ms = same frame
-        orig_full = cv2.imread(orig_path, cv2.IMREAD_GRAYSCALE)
+        orig_full = seq_imread(orig_path, cv2.IMREAD_GRAYSCALE)
         match_label = f"MATCH  Δ={delta_ms:.0f}ms"
         match_color = (0, 220, 80)
     else:

@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from evt3_reader import EVT3Reader
 from dataset_builder import load_annotations, load_removed_windows
 from config import WINDOW_US, IMG_W, IMG_H
+from zip_utils import init_sequence, seq_exists
 
 try:
     import cv2
@@ -51,7 +52,9 @@ BASE = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', args.seq)
 RAW  = os.path.join(BASE, 'Event', 'events.raw')
 ANN  = os.path.join(BASE, 'coordinates.txt')
 
-if not os.path.exists(RAW):
+init_sequence(BASE)
+
+if not seq_exists(RAW):
     print(f"ERROR: {RAW} not found")
     sys.exit(1)
 
