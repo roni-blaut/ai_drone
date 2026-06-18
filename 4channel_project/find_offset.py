@@ -8,15 +8,18 @@ Usage:
     cd 4channel_project
     python find_offset.py
 """
-import sys, os, glob
+import sys, os
 import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 
 from evt3_reader import EVT3Reader
+from zip_utils import init_sequence, seq_glob
 
 BASE       = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', '7')
 RAW_FILE   = os.path.join(BASE, 'Event', 'events.raw')
 FRAMES_DIR = os.path.join(BASE, 'Event', 'Frames')
+
+init_sequence(BASE)
 
 # ── First event timestamp from events.raw ─────────────────────────────────────
 
@@ -40,7 +43,7 @@ for i, t in enumerate(first_10):
 
 # ── First Frames/ filename ────────────────────────────────────────────────────
 
-frames        = glob.glob(os.path.join(FRAMES_DIR, '*.png'))
+frames        = seq_glob(FRAMES_DIR, '*.png')
 frame_ts      = sorted([int(os.path.basename(p).split('_frame_')[1][:-4]) for p in frames])
 first_frame_t = frame_ts[0]
 last_frame_t  = frame_ts[-1]

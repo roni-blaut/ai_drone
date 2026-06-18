@@ -1,26 +1,23 @@
 """
-dataset_builder.py — Build YOLO training dataset from FRED sequence.
+dataset_builder.py — Build YOLO training dataset from FRED sequences.
+
+Multi-sequence mode (default):
+  Reads data_from_fred/splits.yaml to assign each zip to train/val/test.
+  All generated PNGs go into dataset/images/ (flat).
+  Split membership is recorded in dataset/train.txt, val.txt, test.txt.
+  Run: python dataset_builder.py
+
+Single-sequence mode (legacy):
+  Randomly splits frames 80/20 within sequence 7.
+  Run: python dataset_builder.py --single
 
 For each 33ms window:
-  1. Read events from events.raw
+  1. Read events from events.raw (zip or folder)
   2. Apply noise filters
   3. Generate 4 channels → shape (4, 720, 1280)
   4. Find matching annotation from coordinates.txt
-  5. Save channel stack as 4-channel PNG (RGBA) — required by Ultralytics
-  6. Save YOLO label as .txt file
-
-Output structure:
-  dataset/
-  ├── images/
-  │   ├── train/   ← 4-channel PNG files (RGBA, 8-bit per channel)
-  │   └── val/
-  ├── labels/
-  │   ├── train/   ← YOLO format .txt files
-  │   └── val/
-  └── dataset.yaml  ← includes channels: 4
-
-Usage:
-    python dataset_builder.py
+  5. Save 4-channel PNG (RGBA) to dataset/images/
+  6. Save YOLO label to dataset/labels/
 """
 
 import os
@@ -28,6 +25,7 @@ import glob
 import numpy as np
 import random
 from PIL import Image
+from zip_utils import seq_open_lines, seq_exists, init_sequence
 from config import (
     RAW_FILE, COORDS_FILE, DATASET_DIR,
     IMG_W, IMG_H, WINDOW_US,
@@ -37,6 +35,9 @@ from config import (
 from evt3_reader import EVT3Reader
 from filters import fast_filter
 from channels import generate_channels, channels_to_rgb_preview
+
+_HERE          = os.path.dirname(os.path.abspath(__file__))
+DATA_FROM_FRED = os.path.normpath(os.path.join(_HERE, '..', 'data_from_fred'))
 
 
 # ── Annotation loader ─────────────────────────────────────────────────────────
@@ -49,8 +50,7 @@ def load_annotations(coords_file):
     We convert time to microseconds for alignment with event timestamps.
     """
     annotations = []
-    with open(coords_file, 'r') as f:
-        for line in f:
+    for line in seq_open_lines(coords_file):
             line = line.strip()
             if not line:
                 continue
@@ -357,46 +357,223 @@ names: ['drone']
     return yaml_path
 
 
+# ── Multi-sequence builder ────────────────────────────────────────────────────
+
+def _find_coords(seq_dir):
+    """Return the best annotation file for seq_dir (interpolated preferred)."""
+    interp = os.path.join(seq_dir, 'interpolated_coordinates.txt')
+    return interp if seq_exists(interp) else os.path.join(seq_dir, 'coordinates.txt')
+
+
+def _process_sequence(seq_num, raw_file, coords_file, output_dir, window_us):
+    """
+    Process one sequence: generate 4-channel PNGs and labels into output_dir/images|labels/.
+    Returns list of absolute image paths that were generated.
+    """
+    annotations     = load_annotations(coords_file)
+    removed_windows = load_removed_windows(annotations)
+
+    reader   = EVT3Reader(raw_file)
+    ts_shift = reader.ts_shift_us
+
+    n_total = n_with_ann = n_empty = 0
+    img_paths = []
+
+    T_DRONE_START_US = 9_800_000 + ts_shift
+
+    for t_start, events in reader.iter_windows(window_us, t_start=T_DRONE_START_US):
+        n_total += 1
+        if n_total % 100 == 0:
+            print(f"  [seq {seq_num}] {n_total} windows  "
+                  f"{n_with_ann} annotated  {n_empty} skipped")
+
+        if len(events) == 0:
+            n_empty += 1
+            continue
+
+        t_end        = t_start + window_us
+        t_sync_start = t_start - ts_shift
+        t_sync_end   = t_end   - ts_shift
+
+        if in_removed_window(t_sync_start, t_sync_end, removed_windows):
+            n_empty += 1
+            continue
+
+        ann          = find_annotation(annotations, t_sync_start, t_sync_end)
+        events_clean = fast_filter(events)
+
+        if len(events_clean) == 0:
+            n_empty += 1
+            continue
+
+        channels   = generate_channels(events_clean, t_start, t_end)
+        frame_name = f"s{seq_num}_{t_start:012d}"
+
+        img_hwc  = (channels.transpose(1, 2, 0) * 255).clip(0, 255).astype(np.uint8)
+        img_path = os.path.join(output_dir, 'images', frame_name + '.png')
+        Image.fromarray(img_hwc, mode='RGBA').save(img_path)
+
+        lbl_path = os.path.join(output_dir, 'labels', frame_name + '.txt')
+        with open(lbl_path, 'w') as f:
+            if ann is not None:
+                x1, y1, x2, y2 = ann
+                cx, cy, w, h = bbox_to_yolo(x1, y1, x2, y2)
+                f.write(f"0 {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
+                n_with_ann += 1
+
+        img_paths.append(os.path.abspath(img_path))
+
+    print(f"  [seq {seq_num}] Done: {n_total} processed  "
+          f"{n_with_ann} annotated  {n_empty} skipped")
+    return img_paths
+
+
+def build_multi_sequence(
+    splits_yaml = None,
+    output_dir  = DATASET_DIR,
+    window_us   = WINDOW_US,
+):
+    """
+    Build 4-channel dataset from multiple sequences using splits.yaml.
+
+    Each sequence zip is assigned entirely to one split (train/val/test).
+    Generates dataset/images/ and dataset/labels/ (flat) plus
+    dataset/train.txt, val.txt, test.txt index files for Ultralytics YOLO.
+    """
+    try:
+        import yaml as _yaml
+    except ImportError:
+        print("ERROR: pip install pyyaml"); return
+
+    if splits_yaml is None:
+        splits_yaml = os.path.join(DATA_FROM_FRED, 'splits.yaml')
+
+    if not os.path.isfile(splits_yaml):
+        print(f"ERROR: splits.yaml not found: {splits_yaml}")
+        print("Create it or run with --single for legacy single-sequence mode.")
+        return
+
+    with open(splits_yaml) as f:
+        splits = _yaml.safe_load(f) or {}
+
+    os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'labels'), exist_ok=True)
+
+    split_paths = {'train': [], 'val': [], 'test': []}
+
+    for split in ('train', 'val', 'test'):
+        seq_list = splits.get(split) or []
+        for seq_num in seq_list:
+            seq_dir = os.path.join(DATA_FROM_FRED, str(seq_num))
+            print(f"\n{'='*55}")
+            print(f"  Sequence {seq_num}  →  {split}")
+            print(f"{'='*55}")
+            init_sequence(seq_dir)
+            raw_file    = os.path.join(seq_dir, 'Event', 'events.raw')
+            coords_file = _find_coords(seq_dir)
+            paths = _process_sequence(seq_num, raw_file, coords_file,
+                                      output_dir, window_us)
+            split_paths[split].extend(paths)
+
+    # Write index txt files (absolute paths, one per line)
+    for split, paths in split_paths.items():
+        txt_path = os.path.join(output_dir, f'{split}.txt')
+        with open(txt_path, 'w') as f:
+            f.writelines(p + '\n' for p in paths)
+        print(f"\n{split}.txt : {len(paths)} images")
+
+    yaml_path = _write_yaml_multi(output_dir)
+
+    print(f"\n{'='*55}")
+    print(f"Dataset ready: {os.path.abspath(output_dir)}")
+    print(f"  train : {len(split_paths['train'])} images")
+    print(f"  val   : {len(split_paths['val'])} images")
+    print(f"  test  : {len(split_paths['test'])} images")
+    print(f"  YAML  : {yaml_path}")
+    return output_dir
+
+
+def _write_yaml_multi(output_dir):
+    """Write dataset.yaml using txt-file split format for Ultralytics YOLO."""
+    abs_dir  = os.path.abspath(output_dir)
+    yaml_str = f"""# FRED 4-Channel Drone Detection Dataset
+# Generated by dataset_builder.py (multi-sequence mode)
+# Splits are defined in data_from_fred/splits.yaml
+
+path:  {abs_dir}
+train: train.txt
+val:   val.txt
+test:  test.txt
+
+# 4-channel input: positive polarity, negative polarity, rotor map, time surface
+channels: 4
+
+nc: 1
+names: ['drone']
+"""
+    yaml_path = os.path.join(output_dir, 'dataset.yaml')
+    with open(yaml_path, 'w') as f:
+        f.write(yaml_str)
+    return yaml_path
+
+
 # ── Quick stats ───────────────────────────────────────────────────────────────
 
 def print_dataset_stats(output_dir=DATASET_DIR):
-    """Print summary of a built dataset."""
-    for split in ['train', 'val']:
-        img_dir   = os.path.join(output_dir, 'images', split)
-        label_dir = os.path.join(output_dir, 'labels', split)
+    """Print summary of a built dataset (supports both flat and split-subdir layouts)."""
+    flat_img_dir   = os.path.join(output_dir, 'images')
+    flat_label_dir = os.path.join(output_dir, 'labels')
+    is_flat = (os.path.isdir(flat_img_dir) and
+               not os.path.isdir(os.path.join(flat_img_dir, 'train')))
 
-        n_imgs   = len(glob.glob(os.path.join(img_dir, '*.png')))
-        n_labels = len(glob.glob(os.path.join(label_dir, '*.txt')))
-
-        # Count frames with drones
-        n_drone = 0
-        for lf in glob.glob(os.path.join(label_dir, '*.txt')):
-            if os.path.getsize(lf) > 0:
-                n_drone += 1
-
-        print(f"  {split:5s}: {n_imgs} images, "
-              f"{n_drone} with drone ({100*n_drone/max(n_imgs,1):.0f}%)")
+    if is_flat:
+        # Multi-sequence flat layout: report per txt index file
+        total_imgs = len(glob.glob(os.path.join(flat_img_dir, '*.png')))
+        print(f"  Total images : {total_imgs}")
+        for split in ['train', 'val', 'test']:
+            txt = os.path.join(output_dir, f'{split}.txt')
+            if os.path.isfile(txt):
+                lines = [l.strip() for l in open(txt) if l.strip()]
+                print(f"  {split:5s}        : {len(lines)} images")
+    else:
+        # Legacy split-subdir layout
+        for split in ['train', 'val']:
+            img_dir   = os.path.join(output_dir, 'images', split)
+            label_dir = os.path.join(output_dir, 'labels', split)
+            n_imgs  = len(glob.glob(os.path.join(img_dir,   '*.png')))
+            n_drone = sum(1 for lf in glob.glob(os.path.join(label_dir, '*.txt'))
+                          if os.path.getsize(lf) > 0)
+            print(f"  {split:5s}: {n_imgs} images, "
+                  f"{n_drone} with drone ({100*n_drone/max(n_imgs,1):.0f}%)")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Build FRED 4-channel YOLO dataset")
+    parser.add_argument('--single', action='store_true',
+                        help='Legacy: single sequence mode (random 80/20 split, seq 7 only)')
+    args = parser.parse_args()
 
     print("=" * 60)
     print("FRED 4-Channel Dataset Builder")
     print("=" * 60)
 
-    if not os.path.exists(RAW_FILE):
-        print(f"ERROR: Raw file not found: {RAW_FILE}")
-        print("Make sure SEQUENCE_DIR in config.py points to folder 7")
-        sys.exit(1)
-
-    if not os.path.exists(COORDS_FILE):
-        print(f"ERROR: Annotations not found: {COORDS_FILE}")
-        sys.exit(1)
-
-    build_dataset()
+    if args.single:
+        # Legacy single-sequence mode
+        if not seq_exists(RAW_FILE):
+            print(f"ERROR: Raw file not found: {RAW_FILE}")
+            sys.exit(1)
+        if not seq_exists(COORDS_FILE):
+            print(f"ERROR: Annotations not found: {COORDS_FILE}")
+            sys.exit(1)
+        build_dataset()
+    else:
+        # Multi-sequence mode (reads splits.yaml)
+        build_multi_sequence()
 
     print("\nDataset statistics:")
     print_dataset_stats()

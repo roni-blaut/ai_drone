@@ -13,16 +13,33 @@ Run from ai_drone/Fred/:
 """
 
 import os
+import sys
 import glob
 import shutil
 import random
 import argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SEQ  = os.path.join(HERE, '..', '7')
+SEQ  = os.path.join(HERE, '..', 'data_from_fred', '7')
+
+# Zip-transparent file access (reads from 7.zip if folder not present)
+sys.path.insert(0, os.path.join(HERE, '..', '4channel_project'))
+from zip_utils import init_sequence, seq_glob, seq_exists, seq_open_lines
+
+init_sequence(SEQ)
 
 TRAIN_RATIO = 0.8
 RANDOM_SEED = 42
+
+
+def _copy_file(src, dst):
+    """Copy a file from disk or zip to dst (always disk)."""
+    if os.path.isfile(src):
+        shutil.copy(src, dst)
+    else:
+        from zip_utils import _ACTIVE_SEQ
+        with open(dst, 'wb') as out:
+            out.write(_ACTIVE_SEQ.read_bytes(src))
 
 
 def build(mode='event'):
@@ -41,16 +58,16 @@ def build(mode='event'):
         out_dir   = os.path.join(HERE, 'fred_rgb_yolo')
         channels  = 3
 
-    if not os.path.exists(img_dir):
+    if not seq_exists(img_dir):
         print(f"ERROR: {img_dir} not found"); return
-    if not os.path.exists(label_dir):
+    if not seq_exists(label_dir):
         print(f"ERROR: {label_dir} not found"); return
 
     for split in ('train', 'val'):
         os.makedirs(os.path.join(out_dir, 'images', split), exist_ok=True)
         os.makedirs(os.path.join(out_dir, 'labels', split), exist_ok=True)
 
-    img_files = sorted(glob.glob(os.path.join(img_dir, f'*{img_ext}')))
+    img_files = seq_glob(img_dir, f'*{img_ext}')
     if not img_files:
         print(f"ERROR: No {img_ext} files in {img_dir}"); return
 
@@ -62,7 +79,7 @@ def build(mode='event'):
     for img_path in img_files:
         stem       = os.path.splitext(os.path.basename(img_path))[0]
         label_path = os.path.join(label_dir, stem + '.txt')
-        if os.path.exists(label_path) and open(label_path).read().strip():
+        if seq_exists(label_path) and ''.join(seq_open_lines(label_path)).strip():
             t_start_file = img_path
             break
 
@@ -85,16 +102,17 @@ def build(mode='event'):
         stem       = os.path.splitext(os.path.basename(img_path))[0]
         label_path = os.path.join(label_dir, stem + '.txt')
 
-        if not os.path.exists(label_path):
+        if not seq_exists(label_path):
             n_skip += 1
             continue
 
         split = 'train' if random.random() < TRAIN_RATIO else 'val'
 
-        shutil.copy(img_path,   os.path.join(out_dir, 'images', split, stem + img_ext))
-        shutil.copy(label_path, os.path.join(out_dir, 'labels', split, stem + '.txt'))
+        _copy_file(img_path,   os.path.join(out_dir, 'images', split, stem + img_ext))
+        _copy_file(label_path, os.path.join(out_dir, 'labels', split, stem + '.txt'))
 
-        if open(label_path).read().strip():
+        label_content = ''.join(seq_open_lines(label_path)).strip()
+        if label_content:
             n_drone += 1
         else:
             n_empty += 1

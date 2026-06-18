@@ -25,7 +25,7 @@ Usage:
     python sync_check.py --save sync.mp4  # also save video
 """
 
-import sys, os, glob, argparse
+import sys, os, argparse
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -37,6 +37,7 @@ from config import (
     PADDED_RGB_DIR,
     RGB_YOLO_DIR,
 )
+from zip_utils import seq_glob, seq_imread, seq_exists, seq_open_lines
 
 try:
     import cv2
@@ -60,7 +61,7 @@ for d, name in [(FRAMES_DIR,     'Event/Frames/'),
                 (EVENT_YOLO_DIR, 'Event_YOLO/'),
                 (PADDED_RGB_DIR, 'PADDED_RGB/'),
                 (RGB_YOLO_DIR,   'RGB_YOLO/')]:
-    if not os.path.exists(d):
+    if not seq_exists(d):
         print(f"ERROR: {name} not found at:\n  {d}")
         print(f"\nCheck SEQUENCE_DIR in config.py — currently: {SEQUENCE_DIR}")
         sys.exit(1)
@@ -85,12 +86,11 @@ def _rgb_sec(path):
 def load_boxes(lbl_path):
     """Return list of (cx, cy, w, h) from a YOLO label file."""
     boxes = []
-    if os.path.exists(lbl_path) and os.path.getsize(lbl_path) > 0:
-        with open(lbl_path) as f:
-            for line in f:
-                v = line.strip().split()
-                if len(v) == 5:
-                    boxes.append(tuple(float(x) for x in v[1:]))
+    if seq_exists(lbl_path):
+        for line in seq_open_lines(lbl_path):
+            v = line.strip().split()
+            if len(v) == 5:
+                boxes.append(tuple(float(x) for x in v[1:]))
     return boxes
 
 def draw_boxes(img, boxes, color, thickness=2):
@@ -110,11 +110,11 @@ def draw_boxes(img, boxes, color, thickness=2):
 # Event_YOLO filenames: Video_7_frame_{ts_us}.txt
 # Matching Frames/ PNG has the same stem with .png extension
 
-ev_lbl_files = glob.glob(os.path.join(EVENT_YOLO_DIR, '*.txt'))
+ev_lbl_files = seq_glob(EVENT_YOLO_DIR, '*.txt')
 ev_pairs = []
 for lbl in ev_lbl_files:
     img = os.path.join(FRAMES_DIR, os.path.basename(lbl).replace('.txt', '.png'))
-    if os.path.exists(img):
+    if seq_exists(img):
         ev_pairs.append((_ev_ts_us(lbl), img, lbl))
 ev_pairs.sort(key=lambda x: x[0])   # numeric sort
 
@@ -137,11 +137,11 @@ if args.start is not None:
 # RGB_YOLO filenames: Video_7_HH_MM_SS.ffffff.txt
 # Matching PADDED_RGB/ JPG has the same stem with .jpg extension
 
-rgb_lbl_files = glob.glob(os.path.join(RGB_YOLO_DIR, '*.txt'))
+rgb_lbl_files = seq_glob(RGB_YOLO_DIR, '*.txt')
 rgb_pairs = []
 for lbl in rgb_lbl_files:
     img = os.path.join(PADDED_RGB_DIR, os.path.basename(lbl).replace('.txt', '.jpg'))
-    if os.path.exists(img):
+    if seq_exists(img):
         rgb_pairs.append((_rgb_sec(lbl), img, lbl))
 rgb_pairs.sort(key=lambda x: x[0])   # chronological
 
@@ -221,7 +221,7 @@ while 0 <= idx < n_pairs:
     rgb_boxes = load_boxes(rgb_lbl_path)
 
     # ── Event panel ───────────────────────────────────────────────────────────
-    ev_raw = cv2.imread(ev_img_path, cv2.IMREAD_GRAYSCALE)
+    ev_raw = seq_imread(ev_img_path, cv2.IMREAD_GRAYSCALE)
     if ev_raw is None:
         ev_raw = np.zeros((IMG_H, IMG_W), dtype=np.uint8)
     ev_bgr = cv2.cvtColor(ev_raw, cv2.COLOR_GRAY2BGR)
@@ -233,7 +233,7 @@ while 0 <= idx < n_pairs:
                 (6, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.42, EV_COLOR, 1)
 
     # ── RGB panel ─────────────────────────────────────────────────────────────
-    rgb_raw = cv2.imread(rgb_img_path)
+    rgb_raw = seq_imread(rgb_img_path)
     if rgb_raw is None:
         rgb_raw = np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8)
     draw_boxes(rgb_raw, rgb_boxes, RGB_COLOR)

@@ -88,13 +88,19 @@ else:
     DATASET_DIR  = "./dataset"
     RUNS_DIR     = "./runs"
 
+# Initialise zip or real-folder access for SEQUENCE_DIR
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or '.')
+from zip_utils import init_sequence as _init_sequence, seq_exists as _seq_exists
+_init_sequence(SEQUENCE_DIR)
+
 # Raw event file
 RAW_FILE    = os.path.join(SEQUENCE_DIR, "Event", "events.raw")
 
 # Ground-truth annotations
 # interpolated_coordinates.txt has smoother (float) bboxes vs integer coords in coordinates.txt
 _interp = os.path.join(SEQUENCE_DIR, "interpolated_coordinates.txt")
-COORDS_FILE = _interp if os.path.exists(_interp) else os.path.join(SEQUENCE_DIR, "coordinates.txt")
+COORDS_FILE = _interp if _seq_exists(_interp) else os.path.join(SEQUENCE_DIR, "coordinates.txt")
 
 # Event data
 FRAMES_DIR     = os.path.join(SEQUENCE_DIR, "Event", "Frames")

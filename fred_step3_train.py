@@ -28,13 +28,24 @@ RUN_NAME     = "fred_drone_event"
 # ── Train ────────────────────────────────────────────────────────────────────
 
 def train():
-    # Load YOLO v11 with ImageNet pretrained weights
-    model = YOLO(MODEL)
+    last_pt = os.path.join(PROJECT, RUN_NAME, 'weights', 'last.pt')
+    best_pt = os.path.join(PROJECT, RUN_NAME, 'weights', 'best.pt')
+
+    if os.path.exists(last_pt):
+        print(f"Checkpoint found: {last_pt}")
+        print("Resuming training from last checkpoint...")
+        model = YOLO(last_pt)
+        resume = True
+    else:
+        print("No checkpoint found — starting fresh training...")
+        model = YOLO(MODEL)
+        resume = False
 
     print(f"Training YOLO v11 on FRED event frames...")
     print(f"Dataset: {DATASET_YAML}")
     print(f"Epochs:  {EPOCHS}")
     print(f"Batch:   {BATCH}")
+    print(f"Resume:  {resume}")
 
     results = model.train(
         data      = DATASET_YAML,
@@ -44,13 +55,11 @@ def train():
         device    = DEVICE,
         project   = PROJECT,
         name      = RUN_NAME,
-        # Recommended settings from the paper's evaluation protocol
-        # Detection assessed at 33ms intervals (30 FPS)
-        patience  = 20,          # Stop early if no improvement after 20 epochs
-        save      = True,        # Save best + last checkpoints
-        plots     = True,        # Save training plots
-        val       = True,        # Run validation each epoch
-        # Augmentation (helps with challenging conditions in FRED)
+        patience  = 20,
+        resume    = resume,
+        save      = True,
+        plots     = True,
+        val       = True,
         hsv_h     = 0.015,
         hsv_s     = 0.7,
         hsv_v     = 0.4,

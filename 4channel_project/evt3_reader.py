@@ -47,8 +47,28 @@ class EVT3Reader:
     """
 
     def __init__(self, filepath, chunk_size=2_000_000):
-        self.filepath    = filepath
-        self.chunk_size  = chunk_size
+        self.filepath   = filepath
+        self.chunk_size = chunk_size
+        self._bio       = None   # io.BytesIO when reading from zip
+
+        # Auto-detect zip mode via zip_utils global
+        try:
+            from zip_utils import _ACTIVE_SEQ
+            if _ACTIVE_SEQ is not None and not os.path.isfile(filepath):
+                self._bio        = _ACTIVE_SEQ.open_binary(filepath)
+                self.file_size   = len(self._bio.getvalue())
+                self.ts_shift_us = _ACTIVE_SEQ.ts_shift_us
+                self.header_end  = self._find_header_end()
+                print(f"EVT3Reader: {filepath}  [zip mode]")
+                print(f"  Header ends at byte {self.header_end}")
+                print(f"  Binary data: {(self.file_size - self.header_end) / 1e6:.1f} MB")
+                if self.ts_shift_us:
+                    print(f"  ts_shift_us : {self.ts_shift_us:,} µs ({self.ts_shift_us/1e6:.3f} s)")
+                return
+        except ImportError:
+            pass
+
+        # Normal filesystem mode
         self.header_end  = self._find_header_end()
         self.file_size   = os.path.getsize(filepath)
         self.ts_shift_us = self._read_ts_shift()
@@ -85,18 +105,30 @@ class EVT3Reader:
 
     def _find_header_end(self):
         """Scan for end of ASCII header (lines starting with %)."""
-        with open(self.filepath, 'rb') as f:
+        f = self._get_file()
+        try:
             pos = 0
             for line in f:
                 if not line.startswith(b'%'):
                     break
                 pos += len(line)
-        return pos
+            return pos
+        finally:
+            if self._bio is None:
+                f.close()
+
+    def _get_file(self):
+        """Return a seekable file-like object positioned at byte 0."""
+        if self._bio is not None:
+            self._bio.seek(0)
+            return self._bio
+        return open(self.filepath, 'rb')
 
     def read_header(self):
         """Return header as a dict of key→value pairs."""
         info = {}
-        with open(self.filepath, 'rb') as f:
+        f = self._get_file()
+        try:
             for line in f:
                 if not line.startswith(b'%'):
                     break
@@ -104,6 +136,9 @@ class EVT3Reader:
                 if ':' in line:
                     k, v = line.split(':', 1)
                     info[k.strip()] = v.strip()
+        finally:
+            if self._bio is None:
+                f.close()
         return info
 
     # ── Full file read ────────────────────────────────────────────────────────
@@ -253,70 +288,74 @@ class EVT3Reader:
     def _iter_chunks(self):
         """
         Internal generator: yield decoded events chunk by chunk.
-        Maintains decoder state (current_y, timestamp) across chunks.
+        Dispatches to _stream_chunks() over BytesIO (zip) or file (disk).
+        """
+        if self._bio is not None:
+            self._bio.seek(self.header_end)
+            yield from self._stream_chunks(self._bio)
+        else:
+            with open(self.filepath, 'rb') as f:
+                f.seek(self.header_end)
+                yield from self._stream_chunks(f)
+
+    def _stream_chunks(self, f):
+        """
+        Read EVT3 words from file-like object f and yield event arrays.
+        State (current_y, timestamp, rollover) is maintained across chunks.
         """
         current_y        = 0
         time_high        = 0
         prev_time_high   = 0
-        rollover_offset  = 0      # adds 2^24 µs on each TIME_HIGH rollover
+        rollover_offset  = 0
         current_t        = 0
         ROLLOVER_ADD     = 1 << 24   # 16,777,216 µs = 16.777 s
 
         xs, ys, ts, ps = [], [], [], []
 
-        with open(self.filepath, 'rb') as f:
-            f.seek(self.header_end)
+        while True:
+            raw_bytes = f.read(self.chunk_size * 2)
+            if not raw_bytes:
+                break
 
-            while True:
-                raw_bytes = f.read(self.chunk_size * 2)
-                if not raw_bytes:
-                    break
+            if len(raw_bytes) % 2 != 0:
+                raw_bytes = raw_bytes[:-1]
 
-                # Pad to even number of bytes
-                if len(raw_bytes) % 2 != 0:
-                    raw_bytes = raw_bytes[:-1]
+            words = np.frombuffer(raw_bytes, dtype=np.uint16)
 
-                words = np.frombuffer(raw_bytes, dtype=np.uint16)
+            for word in words:
+                word_type = (word >> 12) & 0xF
 
-                for word in words:
-                    word_type = (word >> 12) & 0xF
+                if word_type == 0x0:            # ADDR_Y
+                    current_y = word & 0x7FF
 
-                    if word_type == 0x0:            # ADDR_Y
-                        current_y = word & 0x7FF
+                elif word_type == 0x2:          # ADDR_X → fire event
+                    pol = (word >> 11) & 0x1
+                    x   = word & 0x7FF
+                    xs.append(x)
+                    ys.append(current_y)
+                    ts.append(current_t)
+                    ps.append(pol)
 
-                    elif word_type == 0x2:          # ADDR_X → fire event
-                        pol = (word >> 11) & 0x1
-                        x   = word & 0x7FF
-                        xs.append(x)
-                        ys.append(current_y)
-                        ts.append(current_t)
-                        ps.append(pol)
+                elif word_type == 0x8:          # TIME_HIGH
+                    new_time_high = int(word & 0xFFF) << 12
+                    if new_time_high < prev_time_high:
+                        rollover_offset += ROLLOVER_ADD
+                    prev_time_high = new_time_high
+                    time_high  = new_time_high
+                    current_t  = rollover_offset + time_high | (current_t & 0xFFF)
 
-                    elif word_type == 0x8:          # TIME_HIGH
-                        new_time_high = int(word & 0xFFF) << 12
-                        # Detect rollover: TIME_HIGH jumped back to a smaller value
-                        if new_time_high < prev_time_high:
-                            rollover_offset += ROLLOVER_ADD
-                        prev_time_high = new_time_high
-                        time_high  = new_time_high
-                        current_t  = rollover_offset + time_high | (current_t & 0xFFF)
+                elif word_type == 0x6:          # TIME_LOW
+                    current_t  = rollover_offset + time_high | int(word & 0xFFF)
 
-                    elif word_type == 0x6:          # TIME_LOW
-                        current_t  = rollover_offset + time_high | int(word & 0xFFF)
+            if xs:
+                chunk = np.empty(len(xs), dtype=EVENT_DTYPE)
+                chunk['x'] = xs
+                chunk['y'] = ys
+                chunk['t'] = np.array(ts, dtype=np.int64)
+                chunk['p'] = ps
+                yield chunk
+                xs, ys, ts, ps = [], [], [], []
 
-                    # Other types (vector events, triggers) → skip
-
-                # Yield events from this chunk
-                if xs:
-                    chunk = np.empty(len(xs), dtype=EVENT_DTYPE)
-                    chunk['x'] = xs
-                    chunk['y'] = ys
-                    chunk['t'] = np.array(ts, dtype=np.int64)
-                    chunk['p'] = ps
-                    yield chunk
-                    xs, ys, ts, ps = [], [], [], []
-
-        # Yield any remaining events
         if xs:
             chunk = np.empty(len(xs), dtype=EVENT_DTYPE)
             chunk['x'] = xs
