@@ -1,6 +1,7 @@
 data_from_fred/*
 !data_from_fred/.gitkeep
 4channel_project/dataset/**
+<<<<<<< HEAD
 
 # Python
 __pycache__/
@@ -12,3 +13,6 @@ runs/
 # Editor & tool settings
 .vscode/
 .claude/
+=======
+FRED/**
+>>>>>>> c3928dc (update gitignore and notebook)
