@@ -357,6 +357,90 @@ names: ['drone']
     return yaml_path
 
 
+# ── Dataset check ─────────────────────────────────────────────────────────────
+
+def check_dataset(output_dir=DATASET_DIR):
+    """Print a summary of a built dataset without regenerating any images."""
+    print(f"\nDataset: {os.path.abspath(output_dir)}")
+
+    img_dir   = os.path.join(output_dir, 'images')
+    label_dir = os.path.join(output_dir, 'labels')
+
+    if not os.path.isdir(img_dir):
+        print("  ERROR: images/ not found — run dataset_builder.py first.")
+        return
+
+    all_pngs = glob.glob(os.path.join(img_dir, '*.png'))
+    all_txts = glob.glob(os.path.join(label_dir, '*.txt'))
+
+    print(f"  images/    : {len(all_pngs):>6} .png files")
+    print(f"  labels/    : {len(all_txts):>6} .txt files")
+    print()
+
+    for split in ['train', 'val', 'test']:
+        txt_path = os.path.join(output_dir, f'{split}.txt')
+        if os.path.isfile(txt_path):
+            lines = [l.strip() for l in open(txt_path) if l.strip()]
+            seqs = sorted(set(
+                os.path.basename(p).split('_')[0].lstrip('s')
+                for p in lines
+                if os.path.basename(p).startswith('s')
+            ), key=lambda x: int(x) if x.isdigit() else x)
+            seq_str = f"  (seqs {', '.join(seqs)})" if seqs else ""
+            print(f"  {split}.txt  : {len(lines):>6} images{seq_str}")
+        else:
+            print(f"  {split}.txt  : NOT FOUND")
+
+    print()
+    names = [os.path.basename(p) for p in all_pngs]
+    if len(names) == len(set(names)):
+        print("  Collision check: OK (all filenames unique)")
+    else:
+        dupes = len(names) - len(set(names))
+        print(f"  Collision check: WARNING — {dupes} duplicate filename(s)!")
+
+
+# ── Catalog + Drive download helpers ─────────────────────────────────────────
+
+def _load_catalog():
+    """Load data_from_fred/catalog.yaml, return sequences dict or {}."""
+    try:
+        import yaml as _yaml
+    except ImportError:
+        return {}
+    cat_path = os.path.join(DATA_FROM_FRED, 'catalog.yaml')
+    if not os.path.isfile(cat_path):
+        return {}
+    with open(cat_path) as f:
+        data = _yaml.safe_load(f) or {}
+    return data.get('sequences', {})
+
+
+def _ensure_zip(seq_num, catalog, data_dir):
+    """
+    Download {seq_num}.zip from Drive if not already present locally.
+
+    Does nothing if the zip or extracted folder already exists in data_dir.
+    Requires drive_file_id to be set in catalog.yaml (run make_catalog.py --scan-drive).
+    """
+    zip_path = os.path.join(data_dir, f"{seq_num}.zip")
+    seq_dir  = os.path.join(data_dir, str(seq_num))
+    if os.path.isfile(zip_path) or os.path.isdir(seq_dir):
+        return
+
+    entry = (catalog or {}).get(str(seq_num), {})
+    fid   = entry.get('drive_file_id', '').strip()
+    if not fid:
+        raise FileNotFoundError(
+            f"Seq {seq_num}.zip not found locally and no drive_file_id in catalog.\n"
+            f"Either download {seq_num}.zip manually to {data_dir}/ or run:\n"
+            f"  python 4channel_project/make_catalog.py --scan-drive"
+        )
+
+    from gdrive import download_zip
+    download_zip(seq_num, fid, data_dir)
+
+
 # ── Multi-sequence builder ────────────────────────────────────────────────────
 
 def _find_coords(seq_dir):
@@ -432,6 +516,7 @@ def build_multi_sequence(
     splits_yaml = None,
     output_dir  = DATASET_DIR,
     window_us   = WINDOW_US,
+    download    = False,
 ):
     """
     Build 4-channel dataset from multiple sequences using splits.yaml.
@@ -439,6 +524,10 @@ def build_multi_sequence(
     Each sequence zip is assigned entirely to one split (train/val/test).
     Generates dataset/images/ and dataset/labels/ (flat) plus
     dataset/train.txt, val.txt, test.txt index files for Ultralytics YOLO.
+
+    download : if True, download missing zips from Drive before processing
+               (requires drive_file_id entries in catalog.yaml).
+               If False (default), missing zips raise FileNotFoundError.
     """
     try:
         import yaml as _yaml
@@ -456,6 +545,8 @@ def build_multi_sequence(
     with open(splits_yaml) as f:
         splits = _yaml.safe_load(f) or {}
 
+    catalog = _load_catalog() if download else {}
+
     os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'labels'), exist_ok=True)
 
@@ -468,6 +559,8 @@ def build_multi_sequence(
             print(f"\n{'='*55}")
             print(f"  Sequence {seq_num}  →  {split}")
             print(f"{'='*55}")
+            if download:
+                _ensure_zip(seq_num, catalog, DATA_FROM_FRED)
             init_sequence(seq_dir)
             raw_file    = os.path.join(seq_dir, 'Event', 'events.raw')
             coords_file = _find_coords(seq_dir)
@@ -553,17 +646,35 @@ if __name__ == "__main__":
     import sys
     import argparse
 
-    parser = argparse.ArgumentParser(description="Build FRED 4-channel YOLO dataset")
-    parser.add_argument('--single', action='store_true',
+    parser = argparse.ArgumentParser(
+        description="Build FRED 4-channel YOLO dataset",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python dataset_builder.py                 # build from splits.yaml\n"
+            "  python dataset_builder.py --download      # auto-download missing zips\n"
+            "  python dataset_builder.py --check         # verify existing dataset\n"
+            "  python dataset_builder.py --single        # legacy seq-7 only mode\n"
+        ),
+    )
+    parser.add_argument('--single',   action='store_true',
                         help='Legacy: single sequence mode (random 80/20 split, seq 7 only)')
+    parser.add_argument('--download', action='store_true',
+                        help='Download missing zips from Drive before building '
+                             '(requires drive_file_id in catalog.yaml)')
+    parser.add_argument('--check',    action='store_true',
+                        help='Print dataset statistics without regenerating images')
     args = parser.parse_args()
 
     print("=" * 60)
     print("FRED 4-Channel Dataset Builder")
     print("=" * 60)
 
+    if args.check:
+        check_dataset()
+        sys.exit(0)
+
     if args.single:
-        # Legacy single-sequence mode
         if not seq_exists(RAW_FILE):
             print(f"ERROR: Raw file not found: {RAW_FILE}")
             sys.exit(1)
@@ -572,8 +683,7 @@ if __name__ == "__main__":
             sys.exit(1)
         build_dataset()
     else:
-        # Multi-sequence mode (reads splits.yaml)
-        build_multi_sequence()
+        build_multi_sequence(download=args.download)
 
     print("\nDataset statistics:")
     print_dataset_stats()

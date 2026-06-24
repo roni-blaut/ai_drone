@@ -73,6 +73,7 @@ ai_drone/                              ← git root (this folder)
     ├── channels.py                    ← 4-channel generator
     ├── dataset_builder.py             ← build YOLO dataset from events.raw (multi-seq)
     ├── make_catalog.py                ← scan all zips → write data_from_fred/catalog.yaml
+    ├── gdrive.py                      ← Google Drive folder scan + lazy zip download
     ├── train_4ch_yolo.py              ← train with 4-channel input
     ├── evaluate.py                    ← compare vs paper baseline
     ├── sync_check.py                  ← verify event↔RGB sync with bbox overlay
@@ -118,6 +119,12 @@ val:   [52]
 test:  []
 ```
 Each zip is used as a whole unit for one split — no per-frame random splitting.
+
+**Auto-assign splits by percentage** (writes splits.yaml automatically):
+```powershell
+python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+```
+Sequences are sorted numerically and distributed by the given percentages (reproducible, no randomness).
 
 Generated 4-channel PNGs go into `4channel_project/dataset/images/` (flat folder).
 Split membership is recorded in `dataset/train.txt`, `val.txt`, `test.txt`.
@@ -184,7 +191,9 @@ cd c:\ai_drone
 # (First time or when adding new sequences) Update catalog:
 python 4channel_project/make_catalog.py   # writes data_from_fred/catalog.yaml
 
-# Edit data_from_fred/splits.yaml to assign sequences to train/val/test
+# Option A — assign splits manually: edit data_from_fred/splits.yaml
+# Option B — assign splits automatically by percentage:
+python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
 
 cd 4channel_project
 python dataset_builder.py             # processes all sequences from splits.yaml
@@ -193,9 +202,14 @@ python train_4ch_yolo.py              # auto-resumes from last.pt if interrupted
 python evaluate.py
 ```
 
+Verify dataset split counts without regenerating:
+```powershell
+python 4channel_project/dataset_builder.py --check
+```
+
 Single-sequence legacy mode (seq 7 only, random 80/20 split):
 ```powershell
-python dataset_builder.py --single
+python 4channel_project/dataset_builder.py --single
 ```
 
 ### Sequence catalog
@@ -205,8 +219,25 @@ python 4channel_project/make_catalog.py
 ```
 Scans all `data_from_fred/*.zip`, reads metadata from inside each zip (ts_shift_us,
 frame counts, sizes), and writes `data_from_fred/catalog.yaml`.
-Re-running merges new data but preserves manually written `description` fields.
+Re-running merges new data but preserves manually written `description` and
+`drive_file_id` fields.
 Edit `catalog.yaml` to add descriptions like: `description: "indoor flight, low light"`.
+
+### Google Drive download (optional)
+
+Dataset source: `https://drive.google.com/drive/folders/1pISIErXOx76xmCqkwhS3-azWOMlTKZMp`
+
+If zips are already in `data_from_fred/` (manually downloaded), skip this entirely.
+Use only when you want to fetch missing zips on demand:
+
+```powershell
+# Step 1: scan Drive folder → add drive_file_id to catalog.yaml (one time):
+python 4channel_project/make_catalog.py --scan-drive
+
+# Step 2: build dataset, downloading any missing zips automatically:
+python 4channel_project/dataset_builder.py --download
+```
+Requires `pip install gdown`. Zips already present locally are never re-downloaded.
 
 ### Data sync check (Event ↔ RGB bounding boxes)
 ```powershell

@@ -28,6 +28,7 @@ No channel is redundant. Each carries independent physical information.
 ├── channels.py         ← Generate 4 channels from filtered events
 ├── dataset_builder.py  ← Build YOLO dataset (multi-sequence from splits.yaml)
 ├── make_catalog.py     ← Scan data_from_fred/*.zip → write catalog.yaml
+├── gdrive.py           ← Google Drive folder scan + lazy zip download
 ├── train_4ch_yolo.py   ← Train YOLO with modified 4-channel input
 ├── evaluate.py         ← Evaluate and compare vs paper baseline
 ├── sync_check.py       ← Verify event↔RGB sync with side-by-side bbox overlay
@@ -112,13 +113,20 @@ cd c:\ai_drone
 # (First time or after adding zips) Generate sequence catalog:
 python 4channel_project/make_catalog.py
 
-# Edit data_from_fred/splits.yaml to assign sequences to train/val/test
+# Assign splits — option A: edit data_from_fred/splits.yaml manually
+# Assign splits — option B: auto-assign by percentage:
+python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
 
 cd 4channel_project
 python dataset_builder.py       # reads splits.yaml, processes all assigned sequences
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train_4ch_yolo.py        # auto-resumes from last.pt if interrupted
 python evaluate.py              # compare vs 87.68% baseline
+```
+
+Verify split counts without rebuilding:
+```powershell
+python dataset_builder.py --check
 ```
 
 ### Google Colab (Pipeline 3, T4 GPU — recommended)
@@ -151,8 +159,15 @@ Remove-Item -Recurse -Force dataset
 # (Optional) update catalog after adding new zips:
 python make_catalog.py
 
+# Auto-assign splits by percentage (writes splits.yaml):
+python make_catalog.py --auto-split --train 70 --val 20 --test 10
+# Or edit data_from_fred/splits.yaml manually.
+
 # Build from all sequences in splits.yaml:
 python dataset_builder.py
+
+# Verify split counts without regenerating:
+python dataset_builder.py --check
 ```
 Reads `events.raw` from each zip in `splits.yaml`, generates 4 channels per 33ms window,
 saves **4-channel RGBA PNG** files + YOLO labels into `dataset/images/` and `dataset/labels/`.
@@ -160,6 +175,13 @@ Split membership recorded in `dataset/train.txt`, `val.txt`, `test.txt`.
 Writes `dataset.yaml` with `channels: 4` — Ultralytics reads this natively.
 
 Frame names: `s{seq_num}_{t_us:012d}.png` — unique across all sequences.
+
+**Google Drive download (optional)** — if zips are missing locally:
+```powershell
+python make_catalog.py --scan-drive          # get Drive file IDs → catalog.yaml
+python dataset_builder.py --download         # auto-download missing zips, then build
+```
+Requires `pip install gdown`. Zips already present are never re-downloaded.
 
 Legacy single-sequence mode (seq 7 only): `python dataset_builder.py --single`
 

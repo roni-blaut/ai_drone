@@ -388,11 +388,23 @@ dataset/
 
 Frame naming: `s{seq_num}_{t_us:012d}.png` — globally unique across all sequences.
 
-### Function: `build_multi_sequence(splits_yaml, output_dir, window_us)`
+### Function: `check_dataset(output_dir)`
+
+Prints a summary of a built dataset without regenerating any images:
+- Total `.png` / `.txt` file counts in `images/` and `labels/`
+- Line counts for `train.txt`, `val.txt`, `test.txt` + which sequences each contains
+- Filename collision check (all names must be unique)
+
+Run with `python dataset_builder.py --check`.
+
+### Function: `build_multi_sequence(splits_yaml, output_dir, window_us, download=False)`
 
 **Default entry point.** Reads `data_from_fred/splits.yaml`, calls `_process_sequence()`
 for each sequence in each split, writes `train.txt` / `val.txt` / `test.txt` index files,
 then writes `dataset.yaml` via `_write_yaml_multi()`.
+
+`download=True` loads `catalog.yaml` and calls `_ensure_zip()` before each sequence,
+fetching missing zips from Drive on demand. Pass `--download` on the CLI to enable.
 
 ### Function: `_process_sequence(seq_num, raw_file, coords_file, output_dir, window_us)`
 
@@ -440,10 +452,31 @@ nc: 1
 names: ['drone']
 ```
 
+### Function: `_load_catalog()`
+
+Loads `data_from_fred/catalog.yaml` and returns the `sequences` dict (or `{}` if missing).
+Used by `build_multi_sequence(download=True)` to look up `drive_file_id` values.
+
+### Function: `_ensure_zip(seq_num, catalog, data_dir)`
+
+Called before `init_sequence()` when `--download` is active. Does nothing if the zip
+or extracted folder already exists locally. If the zip is missing, looks up
+`drive_file_id` in `catalog` and calls `gdrive.download_zip()`. Raises
+`FileNotFoundError` with instructions if no ID is available.
+
 ### Function: `print_dataset_stats(output_dir)`
 
 Auto-detects flat vs split-subdir layout. For flat (multi-sequence): counts
 lines in each `*.txt` index file. For legacy: counts files in `images/train/` etc.
+
+### CLI flags
+
+| Flag | Effect |
+|---|---|
+| *(none)* | Multi-sequence build from splits.yaml |
+| `--download` | Auto-download missing zips from Drive before building |
+| `--check` | Print dataset stats, no image generation |
+| `--single` | Legacy single-sequence mode (seq 7, random 80/20) |
 
 ---
 
@@ -451,6 +484,11 @@ lines in each `*.txt` index file. For legacy: counts files in `images/train/` et
 
 **Purpose:** Scan `data_from_fred/*.zip`, read metadata from inside each zip, write
 `data_from_fred/catalog.yaml`. Run manually after adding new zips.
+
+### Constant
+
+`DRIVE_FOLDER_ID = "1pISIErXOx76xmCqkwhS3-azWOMlTKZMp"` — the public Google Drive
+folder that holds the FRED sequence zips.
 
 ### What it reads from each zip (via `ZipSequence`)
 
@@ -463,9 +501,58 @@ lines in each `*.txt` index file. For legacy: counts files in `images/train/` et
 
 ### Merge behaviour
 
-On re-run, existing `description` fields are **preserved** — only auto-generated
-fields are updated. Edit `description` manually in `catalog.yaml` to annotate
-what each sequence contains (lighting conditions, drone model, scenario, etc.).
+On re-run, existing `description` and `drive_file_id` fields are **preserved** — only
+auto-generated fields are updated. Edit these manually in `catalog.yaml` as needed.
+
+### Function: `auto_split(train_pct, val_pct, test_pct)`
+
+Auto-assigns all local `.zip` sequences to train/val/test by percentage.
+Sequences are sorted numerically (reproducible). Writes `data_from_fred/splits.yaml`.
+
+```powershell
+python make_catalog.py --auto-split --train 70 --val 20 --test 10
+```
+
+### Function: `update_drive_ids(folder_id)`
+
+Scans a public Google Drive folder via `gdrive.scan_folder()`, adds `drive_file_id`
+to each matching entry in `catalog.yaml`. Preserves all other fields.
+
+```powershell
+python make_catalog.py --scan-drive
+```
+
+### CLI flags
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--auto-split` | off | auto-assign splits, write splits.yaml |
+| `--train N` | 70 | train % for --auto-split |
+| `--val N` | 20 | val % for --auto-split |
+| `--test N` | 10 | test % for --auto-split |
+| `--scan-drive` | off | scan Drive folder, add drive_file_id to catalog |
+| `--folder-id ID` | DRIVE_FOLDER_ID | override Drive folder ID |
+
+---
+
+## gdrive.py
+
+**Purpose:** Google Drive folder scan and lazy zip download. Used by `make_catalog.py
+--scan-drive` and `dataset_builder.py --download`. Requires `pip install gdown`.
+
+### Function: `scan_folder(folder_id)`
+
+Lists `.zip` files in a public Google Drive folder without an API key (parses the
+public HTML page). Returns `{seq_id: drive_file_id}` dict.
+
+Called by `make_catalog.py --scan-drive`. If Google changes their HTML format this
+may stop working; fall back to adding `drive_file_id` fields manually to catalog.yaml.
+
+### Function: `download_zip(seq_num, drive_file_id, data_dir)`
+
+Downloads `{seq_num}.zip` to `data_dir/` using `gdown.download()`. Verifies the file
+exists after download and prints its size. The caller (`_ensure_zip`) checks for local
+presence first — this function is only called when the zip is genuinely missing.
 
 ---
 
@@ -666,6 +753,8 @@ runs/fred_4channel/
 | fbgemm.dll error | PyTorch DLL load failure | Install Visual C++ Redistributable from aka.ms/vs/17/release/vc_redist.x64.exe |
 | Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python dataset_builder.py` |
 | Sequence not found | `FileNotFoundError: Zip file not found` | Add `N.zip` to `data_from_fred/` or update `splits.yaml` |
+| Drive download fails | `ImportError: gdown is required` | `pip install gdown` |
+| Drive file IDs missing | `no drive_file_id in catalog` | Run `python make_catalog.py --scan-drive` |
 
 ---
 
