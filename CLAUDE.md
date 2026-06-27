@@ -195,21 +195,49 @@ python evaluate.py --mode rgb
 ```
 
 ### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
+
+#### Scenario A — zips already in data_from_fred/ (most common)
 ```powershell
 cd c:\ai_drone
 
-# (First time or when adding new sequences) Update catalog:
-python 4channel_project/make_catalog.py   # writes data_from_fred/catalog.yaml
-
-# Option A — assign splits manually: edit data_from_fred/splits.yaml
-# Option B — assign splits automatically by percentage:
+# Step 1 — assign splits AND index in one command:
 python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+# → writes splits.yaml first, then scans all zips → writes catalog.yaml
+# (or edit splits.yaml manually, then run make_catalog.py with no flags)
 
-cd 4channel_project
-python dataset_builder.py             # processes all sequences from splits.yaml
+# Step 2 — generate 4-channel images:
+python 4channel_project/dataset_builder.py
+# → reads splits.yaml; for each sequence in train/val/test order:
+#     opens zip in-memory, slices events.raw into 33ms windows (t=9.8s onward)
+#     writes dataset/images/s{seq}_{t_us}.png  (4-ch RGBA)
+#            dataset/labels/s{seq}_{t_us}.txt  (YOLO bbox or empty)
+#     appends image path to train.txt / val.txt / test.txt
+# zips are never extracted — all output goes to 4channel_project/dataset/
+
+# Step 3 — train:
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
-python train_4ch_yolo.py              # auto-resumes from last.pt if interrupted
-python evaluate.py
+python 4channel_project/train_4ch_yolo.py   # auto-resumes from last.pt
+
+# Step 4 — evaluate:
+python 4channel_project/evaluate.py
+```
+
+#### Scenario B — zips on Google Drive, download on demand
+```powershell
+cd c:\ai_drone
+
+# Option B1 — download everything at once (simplest):
+python 4channel_project/make_catalog.py --download-all
+# → downloads all zips → data_from_fred/, then runs catalog scan
+# Then continue from Scenario A Step 2.
+
+# Option B2 — selective (download only what splits.yaml needs):
+python 4channel_project/make_catalog.py --scan-drive   # get Drive file IDs → catalog.yaml
+# Edit data_from_fred/splits.yaml to pick which sequences you want
+python 4channel_project/dataset_builder.py --download  # downloads missing zips, then builds
+$env:KMP_DUPLICATE_LIB_OK="TRUE"
+python 4channel_project/train_4ch_yolo.py
+python 4channel_project/evaluate.py
 ```
 
 Verify dataset split counts without regenerating:
@@ -217,21 +245,24 @@ Verify dataset split counts without regenerating:
 python 4channel_project/dataset_builder.py --check
 ```
 
-Single-sequence legacy mode (seq 7 only, random 80/20 split):
+Single-sequence legacy mode (seq 7 only):
 ```powershell
 python 4channel_project/dataset_builder.py --single
 ```
 
 ### Sequence catalog
-```powershell
-# Run from c:\ai_drone
-python 4channel_project/make_catalog.py
+
+`catalog.yaml` = metadata index of every zip you have locally (frame counts, ts_shift, Drive file ID).
+`splits.yaml` = which sequence numbers go to train / val / test.
+
 ```
-Scans all `data_from_fred/*.zip`, reads metadata from inside each zip (ts_shift_us,
-frame counts, sizes), and writes `data_from_fred/catalog.yaml`.
-Re-running merges new data but preserves manually written `description` and
-`drive_file_id` fields.
-Edit `catalog.yaml` to add descriptions like: `description: "indoor flight, low light"`.
+make_catalog.py --auto-split → writes splits.yaml + catalog.yaml  (one command, both files)
+make_catalog.py              → refreshes catalog.yaml only         (splits.yaml unchanged)
+dataset_builder.py           → reads both, generates images
+```
+
+Re-running `make_catalog.py` merges new data but preserves manually written
+`description` and `drive_file_id` fields in catalog.yaml.
 
 ### Google Drive download (optional)
 

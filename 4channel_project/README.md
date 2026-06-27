@@ -118,26 +118,49 @@ Controls: SPACE / D = next,  A = prev,  D = jump +10,  Q = quit.
 
 ### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
 Our approach: reads `events.raw` directly from zip, builds 4 physics-motivated channels.
+
+#### Scenario A — zips already in data_from_fred/ (most common)
 ```powershell
 cd c:\ai_drone
 
-# (First time or after adding zips) Generate sequence catalog:
-python 4channel_project/make_catalog.py
-
-# Assign splits — option A: edit data_from_fred/splits.yaml manually
-# Assign splits — option B: auto-assign by percentage:
+# Step 1 — assign splits AND index in one command:
 python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+# → writes splits.yaml first, then scans all zips → writes catalog.yaml
+# (or edit splits.yaml manually, then run make_catalog.py with no flags)
 
-cd 4channel_project
-python dataset_builder.py       # reads splits.yaml, processes all assigned sequences
+# Step 2 — generate 4-channel images:
+python 4channel_project/dataset_builder.py
+# → reads splits.yaml, builds dataset/images/ + labels/
+
+# Step 3 — train:
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
-python train_4ch_yolo.py        # auto-resumes from last.pt if interrupted
-python evaluate.py              # compare vs 87.68% baseline
+python 4channel_project/train_4ch_yolo.py   # auto-resumes from last.pt
+
+# Step 4 — evaluate:
+python 4channel_project/evaluate.py
+```
+
+#### Scenario B — zips on Google Drive, download on demand
+```powershell
+cd c:\ai_drone
+
+# Option B1 — download everything at once (simplest, no API key):
+python 4channel_project/make_catalog.py --download-all
+# → downloads all zips to data_from_fred/, then runs catalog scan
+# Continue from Scenario A Step 2.
+
+# Option B2 — selective (only what splits.yaml needs):
+python 4channel_project/make_catalog.py --scan-drive   # Drive file IDs → catalog.yaml
+# edit data_from_fred/splits.yaml to pick sequences
+python 4channel_project/dataset_builder.py --download  # downloads missing zips + builds
+$env:KMP_DUPLICATE_LIB_OK="TRUE"
+python 4channel_project/train_4ch_yolo.py
+python 4channel_project/evaluate.py
 ```
 
 Verify split counts without rebuilding:
 ```powershell
-python dataset_builder.py --check
+python 4channel_project/dataset_builder.py --check
 ```
 
 ### Google Colab (Pipeline 3, T4 GPU — recommended)
@@ -180,12 +203,18 @@ python dataset_builder.py
 # Verify split counts without regenerating:
 python dataset_builder.py --check
 ```
-Reads `events.raw` from each zip in `splits.yaml`, generates 4 channels per 33ms window,
-saves **4-channel RGBA PNG** files + YOLO labels into `dataset/images/` and `dataset/labels/`.
-Split membership recorded in `dataset/train.txt`, `val.txt`, `test.txt`.
-Writes `dataset.yaml` with `channels: 4` — Ultralytics reads this natively.
+For each sequence in `splits.yaml` (train first, then val, then test):
+- Opens the zip **in-memory** (never extracted to disk)
+- Slices `events.raw` into 33ms windows starting at t=9.8s (when drone appears)
+- Skips windows with no events, removed/gap frames, or all-noise events
+- Writes per window:
+  - `dataset/images/s{seq}_{t_us:012d}.png` — 4-channel RGBA (pos / neg / rotor / time surface)
+  - `dataset/labels/s{seq}_{t_us:012d}.txt` — YOLO bbox `0 cx cy w h`, or empty if drone out of frame
+- Appends image path to `dataset/train.txt`, `val.txt`, or `test.txt`
+- Writes `dataset/dataset.yaml` with `channels: 4` — Ultralytics reads this natively
 
-Frame names: `s{seq_num}_{t_us:012d}.png` — unique across all sequences.
+Filename prefix `s{seq}` guarantees no collisions across sequences.
+Zips are never modified — all output goes to `dataset/`.
 
 **Google Drive download (optional)** — if zips are missing locally (requires `pip install gdown`):
 ```powershell

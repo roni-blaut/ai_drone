@@ -9,6 +9,78 @@ https://drive.google.com/drive/folders/1pISIErXOx76xmCqkwhS3-azWOMlTKZMp?usp=sha
 https://github.com/miccunifi/FRED/tree/main
 
 
+## Workflow
+
+**Scenario A — zips already in data_from_fred/**
+```
+make_catalog.py --auto-split → splits.yaml + catalog.yaml  (one command does both)
+dataset_builder.py           → dataset/                    (4-channel PNGs + YOLO labels)
+train_4ch_yolo.py            → best.pt                     (trained model)
+evaluate.py                  → mAP50
+```
+`--auto-split` writes `splits.yaml` first, then runs the full catalog scan so
+`catalog.yaml` already reflects the new split assignments. One command, both files.
+
+To refresh the catalog without changing splits (e.g. after adding more zips):
+```
+make_catalog.py              → catalog.yaml only  (splits.yaml unchanged)
+```
+
+**Scenario B — zips on Google Drive**
+```
+make_catalog.py --download-all               → downloads all zips, then Scenario A
+  OR
+make_catalog.py --scan-drive                 → catalog.yaml with drive_file_id per sequence
+  edit splits.yaml to pick which sequences
+dataset_builder.py --download                → downloads missing zips, then builds dataset/
+train_4ch_yolo.py + evaluate.py
+```
+
+**Key file roles:**
+- `catalog.yaml` — metadata index (frame counts, Drive IDs). Read by `--download`, not by training.
+- `splits.yaml` — which sequence numbers → train / val / test. Read by `dataset_builder.py`.
+- `dataset/` — the actual training data (generated PNGs). Read by YOLO.
+
+### What dataset_builder.py does per sequence
+
+Given `splits.yaml` with `train: [0, 1, 4, 7, 10, 31]`, it loops in that order:
+
+```
+For each seq in [0, 1, 4, 7, 10, 31]:
+  open data_from_fred/{seq}.zip   ← read-only, never extracted
+  read Event/events.raw (in-memory via BytesIO)
+  slice into 33ms windows starting at t=9.8s (drone appears)
+
+  for each window:
+    skip if:  zero events / in Removed_frames/ / all events filtered out
+    otherwise:
+      fast_filter()          → remove noise
+      generate_channels()    → 4 arrays (pos / neg / rotor / time surface)
+      save → dataset/images/s{seq}_{t_us:012d}.png   (4-ch RGBA, 720×1280)
+      save → dataset/labels/s{seq}_{t_us:012d}.txt   (YOLO bbox or empty)
+      append path → train.txt
+
+  zip file untouched — all output goes to dataset/
+```
+
+Result in `dataset/`:
+```
+images/s0_000009800000.png          labels/s0_000009800000.txt
+images/s0_000009833000.png          labels/s0_000009833000.txt
+...                                 ...
+images/s31_000025400000.png         labels/s31_000025400000.txt
+
+train.txt  ← absolute paths to all images from seqs 0,1,4,7,10,31
+val.txt    ← absolute paths to images from val sequences
+test.txt   ← absolute paths to images from test sequences
+dataset.yaml  ← channels:4, nc:1, names:[drone]
+```
+
+YOLO reads `train.txt` / `val.txt` / `test.txt` directly — it never sees `splits.yaml` or `catalog.yaml`.
+Filename prefix `s{seq}` guarantees no collisions across sequences.
+
+---
+
 ## Pipeline Overview
 
 ```
