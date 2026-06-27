@@ -10,12 +10,12 @@ Usage:
 """
 import sys, os
 import numpy as np
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from evt3_reader import EVT3Reader
 from zip_utils import init_sequence, seq_glob
 
-BASE       = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', '7')
+BASE       = os.path.join(os.path.dirname(__file__), '..', '..', 'data_from_fred', '7')
 RAW_FILE   = os.path.join(BASE, 'Event', 'events.raw')
 FRAMES_DIR = os.path.join(BASE, 'Event', 'Frames')
 

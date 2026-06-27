@@ -76,22 +76,32 @@ ai_drone/                              ← git root (this folder)
     ├── gdrive.py                      ← Google Drive folder scan + lazy zip download
     ├── train_4ch_yolo.py              ← train with 4-channel input
     ├── evaluate.py                    ← compare vs paper baseline
-    ├── sync_check.py                  ← verify event↔RGB sync with bbox overlay
-    ├── raw_to_movie.py                ← compare events.raw vs Event/Frames/ video
-    ├── verify_frames.py               ← pixel-level alignment check (MAE)
-    ├── colab_run.ipynb                ← Google Colab notebook (T4 GPU)
-    ├── debug_filter_preview.py        ← visualize noise filter effects
-    ├── find_offset.py                 ← find time offset between event/RGB streams
-    ├── inspect_raw.py                 ← inspect EVT3 raw file contents
-    ├── make_filter_movie.py           ← render filter comparison video
-    ├── view_raw_events.py             ← live viewer for raw event stream
-    ├── raw_label_check.py             ← verify events.raw sync with Event_YOLO labels
     ├── runs/detect/                   ← inference output (bounding box overlays)
-    ├── CODE_GUIDE.md                  ← developer guide for 4-channel pipeline
-    ├── EVT3_READER_FIXES.md           ← EVT3 parser bug history
-    ├── FRED_EventCamera_Discussion.md ← research discussion notes
-    ├── flow_chart.md                  ← pipeline flow diagram
-    └── README.md                      ← project overview
+    ├── README.md                      ← project overview
+    ├── requirements.txt               ← pip dependencies
+    ├── environment.yml                ← conda environment
+    ├── yolo11n.pt                     ← YOLO base weights
+    ├── docs/                          ← documentation & research notes
+    │   ├── CODE_GUIDE.md              ← developer guide for 4-channel pipeline
+    │   ├── EVT3_READER_FIXES.md       ← EVT3 parser bug history
+    │   ├── drone_detection_research_summary.md ← full research notes
+    │   ├── FRED_EventCamera_Discussion.md ← research discussion notes
+    │   ├── flow_chart.md              ← pipeline flow diagram
+    │   ├── TODO.md                    ← team task list
+    │   └── channel_preview.png        ← sample 4-channel output image
+    ├── notebooks/                     ← Jupyter notebooks
+    │   ├── colab_run.ipynb            ← Google Colab notebook (T4 GPU)
+    │   └── drone_detection_notebook.ipynb ← exploration notebook
+    └── tools/                         ← diagnostic & visualization utilities
+        ├── sync_check.py              ← verify event↔RGB sync with bbox overlay
+        ├── raw_label_check.py         ← verify events.raw sync with Event_YOLO labels
+        ├── raw_to_movie.py            ← compare events.raw vs Event/Frames/ video
+        ├── verify_frames.py           ← pixel-level alignment check (MAE)
+        ├── debug_filter_preview.py    ← visualize noise filter effects
+        ├── find_offset.py             ← find time offset between event/RGB streams
+        ├── inspect_raw.py             ← inspect EVT3 raw file contents
+        ├── make_filter_movie.py       ← render filter comparison video
+        └── view_raw_events.py         ← live viewer for raw event stream
 ```
 
 ## Zip file access — no extraction needed
@@ -242,9 +252,9 @@ Requires `pip install gdown`. Zips already present locally are never re-download
 ### Data sync check (Event ↔ RGB bounding boxes)
 ```powershell
 cd 4channel_project
-python sync_check.py                  # full sequence, auto-play at 5 fps
-python sync_check.py --start 9.8     # jump to drone segment
-python sync_check.py --save sync.mp4 # save side-by-side video
+python tools/sync_check.py                  # full sequence, auto-play at 5 fps
+python tools/sync_check.py --start 9.8     # jump to drone segment
+python tools/sync_check.py --save sync.mp4 # save side-by-side video
 ```
 LEFT panel (cyan box) = Event/Frames/ + Event_YOLO labels.
 RIGHT panel (orange box) = PADDED_RGB/ + RGB_YOLO labels.
@@ -254,10 +264,10 @@ Controls: SPACE=next  A=prev  D=+10  Q=quit
 ### Raw event data vs Event_YOLO label sync check
 ```powershell
 cd 4channel_project
-python raw_label_check.py                  # full sequence 7
-python raw_label_check.py --start 9.8     # jump to drone segment
-python raw_label_check.py --seq 4         # sequence 4 (reads from 4.zip)
-python raw_label_check.py --save out.mp4  # also save video
+python tools/raw_label_check.py                  # full sequence 7
+python tools/raw_label_check.py --start 9.8     # jump to drone segment
+python tools/raw_label_check.py --seq 4         # sequence 4 (reads from 4.zip)
+python tools/raw_label_check.py --save out.mp4  # also save video
 ```
 Renders frames live from `events.raw` (no pre-extracted PNGs) and overlays the
 matching `Event_YOLO/` bounding box by timestamp.
@@ -270,6 +280,77 @@ ts_shift clock offset (`raw_t - ts_shift_us` → Event_YOLO time).
 Console prints `cx cy w h` and timestamp delta for every frame.
 Controls: SPACE=pause  A/←=prev  D/→=+10  Q=quit
 
+### Event reconstruction vs Frames/ comparison
+```powershell
+cd 4channel_project
+python tools/raw_to_movie.py                        # side-by-side: Frames/ PNG vs raw reconstruction
+python tools/raw_to_movie.py --start 9.8 --end 20  # drone segment only
+python tools/raw_to_movie.py --seq 4               # sequence 4
+```
+LEFT = Event/Frames/ PNG, RIGHT = reconstructed from events.raw. Also saves `raw_events.mp4`.
+Controls: SPACE=pause  Q/ESC=quit
+
+### Pixel-level alignment check
+```powershell
+cd 4channel_project
+python tools/verify_frames.py             # 20 frames from drone segment; prints MAE per frame
+python tools/verify_frames.py --n 50      # check 50 frames
+python tools/verify_frames.py --start 0   # include countdown region
+```
+MAE < 5 = aligned, ~20–40 = off by 1 frame, ~60–80 = badly misaligned.
+
+### Filter before/after preview
+```powershell
+cd 4channel_project
+python tools/debug_filter_preview.py      # saves side-by-side PNG to current dir
+```
+Reads one 33ms window, generates 4-channel images before/after refractory filter.
+
+### Find event/RGB time offset
+```powershell
+cd 4channel_project
+python tools/find_offset.py              # prints first EVT3 timestamp vs first Frames/ filename
+```
+Difference between printed values is the ts_shift_us offset.
+
+### Inspect EVT3 data quality
+```powershell
+cd 4channel_project
+python tools/inspect_raw.py                                              # uses config.py RAW_FILE
+python tools/inspect_raw.py --raw ../data_from_fred/7/Event/events.raw  # explicit path
+python tools/inspect_raw.py --raw ../data_from_fred/7/Event/events.raw --ann ../data_from_fred/7/coordinates.txt
+```
+Auto-detects hot pixels, dead zones, rate spikes, polarity bias. Prints "clean data starts at t=X.Xs".
+
+### Filter comparison movie (live viewer)
+```powershell
+cd 4channel_project
+python tools/make_filter_movie.py                       # drone segment 9.87s–35s
+python tools/make_filter_movie.py --start 0 --end 10   # first 10 seconds
+python tools/make_filter_movie.py --delay 50            # ms per frame (default 33)
+```
+4-channel 2×2 grid: left = raw events, right = after refractory filter.
+Controls: SPACE=pause/resume  →=step  Q/ESC=quit
+
+### Live raw event viewer
+```powershell
+cd 4channel_project
+python tools/view_raw_events.py                       # sequence 7 (default)
+python tools/view_raw_events.py --seq 4               # sequence 4
+python tools/view_raw_events.py --seq 4 --delay 100   # slow down
+```
+GREEN highlight = annotated drone frames, RED = removed/gap, YELLOW = pre/post flight.
+Controls: SPACE=pause  →/D=step forward  ←/A=step back  Q/ESC=quit
+
+### Adding new tools to tools/
+
+All scripts in `tools/` must add this at the top (after the docstring, before local imports) so they can import core modules from the project root:
+```python
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+```
+Run them from `4channel_project/` as `python tools/<script>.py`.
+
 ### PID oscillation analysis
 ```powershell
 # Run from c:\ai_drone
@@ -279,10 +360,10 @@ Detects PID wobble frequency in ground-truth bboxes. Confirmed result: 9.14 Hz p
 
 ### Google Colab (Pipeline 3 only, T4 GPU)
 1. Upload `ai_drone/` to Google Drive (keep folder structure)
-2. Open `4channel_project/colab_run.ipynb` in Colab
+2. Open `4channel_project/notebooks/colab_run.ipynb` in Colab
 3. Runtime → Change runtime type → T4 GPU
 4. Run cells 1–10 in order
 
 ## Full research notes
 
-See: `4channel_project/drone_detection_research_summary.md`
+See: `4channel_project/docs/drone_detection_research_summary.md`
