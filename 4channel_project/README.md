@@ -31,13 +31,24 @@ No channel is redundant. Each carries independent physical information.
 ├── gdrive.py           ← Google Drive folder scan + lazy zip download
 ├── train_4ch_yolo.py   ← Train YOLO with modified 4-channel input
 ├── evaluate.py         ← Evaluate and compare vs paper baseline
-├── sync_check.py       ← Verify event↔RGB sync with side-by-side bbox overlay
-├── raw_to_movie.py     ← Compare events.raw reconstruction vs Event/Frames/ video
-├── verify_frames.py    ← Pixel-level alignment check (MAE score)
-├── raw_label_check.py  ← Verify events.raw sync with Event_YOLO bounding boxes
-├── environment.yml     ← conda environment (CPU PyTorch)
 ├── requirements.txt    ← pip requirements
-└── CODE_GUIDE.md       ← full function-by-function documentation
+├── environment.yml     ← conda environment
+├── tools/              ← diagnostic & visualization utilities
+│   ├── sync_check.py       ← verify event↔RGB sync with side-by-side bbox overlay
+│   ├── raw_label_check.py  ← verify events.raw sync with Event_YOLO labels
+│   ├── raw_to_movie.py     ← compare events.raw reconstruction vs Event/Frames/ video
+│   ├── verify_frames.py    ← pixel-level alignment check (MAE score)
+│   ├── view_raw_events.py  ← live viewer for raw event stream
+│   ├── debug_filter_preview.py ← visualize noise filter effects
+│   ├── find_offset.py      ← find time offset between event/RGB streams
+│   ├── inspect_raw.py      ← inspect EVT3 raw file contents
+│   └── make_filter_movie.py ← render filter comparison video
+├── docs/               ← documentation & research notes
+│   ├── CODE_GUIDE.md       ← full function-by-function documentation
+│   ├── flow_chart.md       ← pipeline flow diagram
+│   └── …
+└── notebooks/          ← Jupyter notebooks
+    └── colab_run.ipynb     ← Google Colab notebook (T4 GPU)
 
 data_from_fred/
 ├── splits.yaml         ← which sequence numbers go to train / val / test
@@ -97,9 +108,9 @@ python evaluate.py --mode rgb
 ### Data sync check — verify Event ↔ RGB alignment
 ```powershell
 cd ai_drone\4channel_project
-python sync_check.py                  # full sequence, 5 fps auto-play
-python sync_check.py --start 9.8     # jump to drone segment (recommended)
-python sync_check.py --save sync.mp4 # save side-by-side video
+python tools/sync_check.py                  # full sequence, 5 fps auto-play
+python tools/sync_check.py --start 9.8     # jump to drone segment (recommended)
+python tools/sync_check.py --save sync.mp4 # save side-by-side video
 ```
 Shows Event/Frames/ (cyan bbox from Event_YOLO) beside PADDED_RGB/ (orange bbox
 from RGB_YOLO). Console prints `Δcx`/`Δcy` per frame — near 0 means synced.
@@ -131,7 +142,7 @@ python dataset_builder.py --check
 
 ### Google Colab (Pipeline 3, T4 GPU — recommended)
 1. Upload `ai_drone/` to Google Drive (keep folder structure intact)
-2. Open `4channel_project/colab_run.ipynb` in Colab
+2. Open `4channel_project/notebooks/colab_run.ipynb` in Colab
 3. Runtime → Change runtime type → T4 GPU
 4. Run cells 1–10 in order (~20-30 min build + ~2-4 hrs training)
 
