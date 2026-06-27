@@ -102,16 +102,18 @@ def auto_split(train_pct, val_pct, test_pct):
     return splits
 
 
-def update_drive_ids(folder_id=DRIVE_FOLDER_ID):
+def update_drive_ids(folder_id=DRIVE_FOLDER_ID, api_key=None):
     """
     Scan a public Google Drive folder and add drive_file_id to catalog.yaml.
 
+    api_key: free Google API key for reliable listing (recommended).
+             Without it, falls back to HTML parsing which often fails.
     Existing catalog entries are updated in-place; other fields are unchanged.
     """
     from gdrive import scan_folder
 
     print(f"Scanning Drive folder {folder_id} ...")
-    id_map = scan_folder(folder_id)
+    id_map = scan_folder(folder_id, api_key=api_key)
 
     if not id_map:
         print("No Drive file IDs found — catalog.yaml not modified.")
@@ -265,10 +267,16 @@ if __name__ == '__main__':
                         help='Val percentage for --auto-split (default: 20)')
     parser.add_argument('--test',        type=int, default=10,
                         help='Test percentage for --auto-split (default: 10)')
-    parser.add_argument('--scan-drive',  action='store_true',
+    parser.add_argument('--scan-drive',    action='store_true',
                         help='Scan Google Drive folder and add drive_file_id to catalog.yaml')
+    parser.add_argument('--download-all', action='store_true',
+                        help='Download ALL zips from Drive folder to data_from_fred/ '
+                             '(no API key needed, uses gdown)')
     parser.add_argument('--folder-id',   default=DRIVE_FOLDER_ID,
                         help=f'Google Drive folder ID (default: {DRIVE_FOLDER_ID})')
+    parser.add_argument('--api-key',     default=None,
+                        help='Google API key for --scan-drive (reliable listing). '
+                             'Free at: console.cloud.google.com → Drive API → Credentials')
     args = parser.parse_args()
 
     if args.auto_split:
@@ -276,8 +284,15 @@ if __name__ == '__main__':
         auto_split(args.train, args.val, args.test)
         print()
 
+    if args.download_all:
+        from gdrive import download_folder_all
+        download_folder_all(args.folder_id, DATA_FROM_FRED)
+        print()
+        main()   # refresh catalog after download
+        sys.exit(0)
+
     if args.scan_drive:
-        update_drive_ids(args.folder_id)
+        update_drive_ids(args.folder_id, api_key=args.api_key)
         sys.exit(0)
 
     main()
