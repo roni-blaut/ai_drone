@@ -483,7 +483,24 @@ lines in each `*.txt` index file. For legacy: counts files in `images/train/` et
 ## make_catalog.py
 
 **Purpose:** Scan `data_from_fred/*.zip`, read metadata from inside each zip, write
-`data_from_fred/catalog.yaml`. Run manually after adding new zips.
+`data_from_fred/catalog.yaml`. Run manually after adding new zips. Does **not** generate
+images and does **not** download anything — metadata only.
+
+### Default run (no flags) — `main()`
+
+Opens every `.zip` in `data_from_fred/`, reads without extracting:
+- `ts_shift_us` from the raw index header
+- `n_event_frames` / `n_event_yolo` / `n_rgb_frames` / `n_rgb_yolo` — file counts inside the zip
+- `zip_size_mb` from the file size on disk
+- `split` — looked up from `splits.yaml` (train/val/test/unassigned)
+
+Merges with any existing `catalog.yaml` so manually written `description` and
+`drive_file_id` fields are preserved. Re-run any time you add new zips or update
+`splits.yaml`.
+
+```powershell
+python 4channel_project/make_catalog.py
+```
 
 ### Constant
 
@@ -704,6 +721,55 @@ Output saved to `./predictions/` folder.
 | 10 | Save trained model back to Drive |
 
 No manual path changes needed — `config.py` auto-detects Colab.
+
+---
+
+## tools/
+
+Diagnostic and visualization utilities. All scripts must be run from `4channel_project/`
+as `python tools/<script>.py`. Each script adds the parent directory to `sys.path` so
+it can import the core modules (`config`, `evt3_reader`, `zip_utils`, etc.).
+
+| Script | Purpose |
+|---|---|
+| `sync_check.py` | Side-by-side Event/Frames+label vs PADDED_RGB+label; prints Δcx/Δcy |
+| `raw_label_check.py` | Render frames from `events.raw`, overlay Event_YOLO bbox; verify sync |
+| `raw_to_movie.py` | Compare Event/Frames/ PNG (left) vs raw reconstruction (right) |
+| `verify_frames.py` | Pixel-level MAE check between Frames/ PNGs and raw reconstruction |
+| `view_raw_events.py` | Live viewer for raw event stream with annotated/removed frame highlights |
+| `debug_filter_preview.py` | 4-channel before/after refractory filter comparison PNG |
+| `find_offset.py` | Print first EVT3 timestamp vs first Frames/ filename to find ts_shift |
+| `inspect_raw.py` | EVT3 data quality report: hot pixels, rate spikes, polarity bias |
+| `make_filter_movie.py` | 2×2 grid video comparing raw vs filtered event channels |
+
+### tools/raw_label_check.py
+
+Renders 33ms windows directly from `events.raw` (no pre-extracted PNGs) and overlays
+the matching `Event_YOLO/` bounding box. Useful for verifying timestamp sync after
+any change to `ts_shift_us` or the EVT3 reader.
+
+Banner colours:
+- **GREEN** — label matched, box drawn; prints `cx cy w h Δt`
+- **ORANGE** — label file exists but empty (drone out of frame)
+- **RED** — no Event_YOLO file within ±16ms
+- **GREY** — window outside annotated range
+
+```powershell
+cd 4channel_project
+python tools/raw_label_check.py                  # sequence 7, full run
+python tools/raw_label_check.py --start 9.8     # jump to drone segment
+python tools/raw_label_check.py --seq 4         # sequence 4 (from 4.zip)
+python tools/raw_label_check.py --save out.mp4  # also save video
+```
+Controls: `SPACE`=pause/resume  `A/←`=prev  `D/→`=+10  `Q/ESC`=quit
+
+### Adding new tools
+
+Every script in `tools/` must include this at the top (after the docstring):
+```python
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+```
 
 ---
 
