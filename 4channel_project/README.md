@@ -187,12 +187,20 @@ Writes `dataset.yaml` with `channels: 4` — Ultralytics reads this natively.
 
 Frame names: `s{seq_num}_{t_us:012d}.png` — unique across all sequences.
 
-**Google Drive download (optional)** — if zips are missing locally:
+**Google Drive download (optional)** — if zips are missing locally (requires `pip install gdown`):
 ```powershell
-python make_catalog.py --scan-drive          # get Drive file IDs → catalog.yaml
-python dataset_builder.py --download         # auto-download missing zips, then build
+# Option A — download everything at once (simplest):
+python make_catalog.py --download-all
+
+# Option B — selective (only what splits.yaml needs):
+python make_catalog.py --scan-drive          # scan folder → save file IDs to catalog.yaml
+python dataset_builder.py --download         # download only missing zips, then build
+
+# Option C — scan with a free Google API key (most reliable):
+python make_catalog.py --scan-drive --api-key AIza...
+python dataset_builder.py --download
 ```
-Requires `pip install gdown`. Zips already present are never re-downloaded.
+Zips already present are never re-downloaded.
 
 Legacy single-sequence mode (seq 7 only): `python dataset_builder.py --single`
 

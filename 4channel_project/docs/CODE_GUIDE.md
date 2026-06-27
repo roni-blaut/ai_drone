@@ -519,7 +519,8 @@ Scans a public Google Drive folder via `gdrive.scan_folder()`, adds `drive_file_
 to each matching entry in `catalog.yaml`. Preserves all other fields.
 
 ```powershell
-python make_catalog.py --scan-drive
+python make_catalog.py --scan-drive               # no API key (uses gdown)
+python make_catalog.py --scan-drive --api-key AIza...   # reliable API key method
 ```
 
 ### CLI flags
@@ -531,22 +532,30 @@ python make_catalog.py --scan-drive
 | `--val N` | 20 | val % for --auto-split |
 | `--test N` | 10 | test % for --auto-split |
 | `--scan-drive` | off | scan Drive folder, add drive_file_id to catalog |
+| `--download-all` | off | download all zips from Drive (no API key, uses gdown) |
 | `--folder-id ID` | DRIVE_FOLDER_ID | override Drive folder ID |
+| `--api-key KEY` | None | Google API key for reliable folder listing |
 
 ---
 
 ## gdrive.py
 
-**Purpose:** Google Drive folder scan and lazy zip download. Used by `make_catalog.py
---scan-drive` and `dataset_builder.py --download`. Requires `pip install gdown`.
+**Purpose:** Google Drive folder scan and bulk/lazy zip download. Requires `pip install gdown`.
 
-### Function: `scan_folder(folder_id)`
+### Function: `scan_folder(folder_id, api_key=None)`
 
-Lists `.zip` files in a public Google Drive folder without an API key (parses the
-public HTML page). Returns `{seq_id: drive_file_id}` dict.
+Lists `.zip` files in a public Google Drive folder. Tries three methods in order:
+1. **gdown** (`skip_download=True`) — reliable, no API key needed (default)
+2. **Drive API v3** — if `api_key` is provided; handles large folders with pagination
+3. **HTML parsing** — last resort fallback; prints fix instructions if it fails
 
-Called by `make_catalog.py --scan-drive`. If Google changes their HTML format this
-may stop working; fall back to adding `drive_file_id` fields manually to catalog.yaml.
+Returns `{seq_id: drive_file_id}` dict. Called by `make_catalog.py --scan-drive`.
+
+### Function: `download_folder_all(folder_id, data_dir)`
+
+Downloads all `.zip` files from the Drive folder to `data_dir/` in one call using
+`gdown.download_folder(resume=True)`. No API key needed. Already-local files are
+skipped automatically via `resume=True`. Called by `make_catalog.py --download-all`.
 
 ### Function: `download_zip(seq_num, drive_file_id, data_dir)`
 
@@ -753,6 +762,8 @@ runs/fred_4channel/
 | fbgemm.dll error | PyTorch DLL load failure | Install Visual C++ Redistributable from aka.ms/vs/17/release/vc_redist.x64.exe |
 | Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python dataset_builder.py` |
 | Sequence not found | `FileNotFoundError: Zip file not found` | Add `N.zip` to `data_from_fred/` or update `splits.yaml` |
+| Drive scan finds no files | `HTML parsing found no .zip files` | `--scan-drive` now uses gdown by default (no API key needed); if still failing, add `--api-key AIza...` |
+| Drive download arg error | `unexpected keyword argument 'remaining_ok'` | Update gdrive.py — fixed in commit a995d75 |
 | Drive download fails | `ImportError: gdown is required` | `pip install gdown` |
 | Drive file IDs missing | `no drive_file_id in catalog` | Run `python make_catalog.py --scan-drive` |
 

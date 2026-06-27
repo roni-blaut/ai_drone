@@ -238,16 +238,23 @@ Edit `catalog.yaml` to add descriptions like: `description: "indoor flight, low 
 Dataset source: `https://drive.google.com/drive/folders/1pISIErXOx76xmCqkwhS3-azWOMlTKZMp`
 
 If zips are already in `data_from_fred/` (manually downloaded), skip this entirely.
-Use only when you want to fetch missing zips on demand:
+Three download modes — all require `pip install gdown`:
 
 ```powershell
-# Step 1: scan Drive folder → add drive_file_id to catalog.yaml (one time):
-python 4channel_project/make_catalog.py --scan-drive
+# Option A — download ALL zips at once (simplest, no API key needed):
+python 4channel_project/make_catalog.py --download-all
 
-# Step 2: build dataset, downloading any missing zips automatically:
+# Option B — selective: scan first, then download only what splits.yaml needs:
+python 4channel_project/make_catalog.py --scan-drive      # saves file IDs → catalog.yaml
+python 4channel_project/dataset_builder.py --download     # downloads only missing zips
+
+# Option C — scan with a free Google API key (most reliable listing):
+python 4channel_project/make_catalog.py --scan-drive --api-key AIza...
 python 4channel_project/dataset_builder.py --download
 ```
-Requires `pip install gdown`. Zips already present locally are never re-downloaded.
+`--scan-drive` uses gdown's built-in folder parser (no API key needed by default).
+`--api-key`: free key from console.cloud.google.com → Enable Drive API → Credentials.
+Zips already present locally are never re-downloaded.
 
 ### Data sync check (Event ↔ RGB bounding boxes)
 ```powershell
