@@ -90,8 +90,8 @@ ai_drone/                              ← git root (this folder)
     │   ├── TODO.md                    ← team task list
     │   └── channel_preview.png        ← sample 4-channel output image
     ├── notebooks/                     ← Jupyter notebooks
-    │   ├── colab_run.ipynb            ← Google Colab notebook (T4 GPU)
-    │   └── drone_detection_notebook.ipynb ← exploration notebook
+    │   ├── colab_run.ipynb            ← Google Colab notebook (T4 GPU, cells 1–10)
+    │   └── drone_detection_notebook.ipynb ← local GPU exploration (step-by-step pipeline walkthrough)
     └── tools/                         ← diagnostic & visualization utilities
         ├── sync_check.py              ← verify event↔RGB sync with bbox overlay
         ├── raw_label_check.py         ← verify events.raw sync with Event_YOLO labels
@@ -357,6 +357,23 @@ Run them from `4channel_project/` as `python tools/<script>.py`.
 python pid_annotation_fft.py          # FFT on annotation centroids → pid_annotation_fft.png
 ```
 Detects PID wobble frequency in ground-truth bboxes. Confirmed result: 9.14 Hz peak, SNR=2.77× at t=9.9–35.2s in sequence 7.
+
+### Local exploration notebook (Pipeline 3, local GPU)
+
+`4channel_project/notebooks/drone_detection_notebook.ipynb` — step-by-step walkthrough
+of the full pipeline on your local machine. Covers EVT3 reading, noise filtering,
+4-channel generation, dataset status, YOLO patch, training curves, evaluation, and PID FFT.
+
+```powershell
+# Open in VS Code or Jupyter from anywhere — notebook auto-detects its location:
+jupyter notebook 4channel_project/notebooks/drone_detection_notebook.ipynb
+```
+
+Run **Cell 1 first** — it sets `cwd` to `4channel_project/` and detects the GPU.
+All other cells depend on this. Requires extracted `data_from_fred/7/Event/events.raw`
+(EVT3Reader streams the binary file directly; zip is not supported for that step).
+
+VRAM requirement: ~2–3 GB for batch=8 at 640px. Reduce `BATCH` in `config.py` if OOM.
 
 ### Google Colab (Pipeline 3 only, T4 GPU)
 1. Upload `ai_drone/` to Google Drive (keep folder structure)
