@@ -24,7 +24,7 @@ import os
 import argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from evt3_reader import EVT3Reader
 from config import RAW_FILE, IMG_W, IMG_H

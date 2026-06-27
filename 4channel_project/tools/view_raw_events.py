@@ -22,7 +22,7 @@ import os
 import argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from evt3_reader import EVT3Reader
 from dataset_builder import load_annotations, load_removed_windows

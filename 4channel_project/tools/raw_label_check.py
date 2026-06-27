@@ -31,7 +31,7 @@ import os
 import argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from evt3_reader import EVT3Reader
 from config import WINDOW_US, IMG_W, IMG_H, SEQUENCE_DIR, EVENT_YOLO_DIR
