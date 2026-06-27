@@ -27,15 +27,61 @@ def scan_folder(folder_id, api_key=None, timeout=30):
     """
     List .zip files in a public Google Drive folder.
 
-    api_key : free Google API key — enables the reliable Drive API v3 method.
-              Without it, falls back to HTML page parsing which often fails.
-              Get one free at console.cloud.google.com (Drive API, no billing).
+    Tries methods in order:
+      1. gdown skip_download=True  — reliable, no API key needed (default)
+      2. Google Drive API v3       — if api_key is provided
+      3. HTML page parsing         — last resort fallback (often fails)
 
     Returns dict {seq_id: file_id} where seq_id is the filename without .zip.
     """
+    result = _scan_folder_gdown(folder_id)
+    if result:
+        return result
+
     if api_key:
-        return _scan_folder_api(folder_id, api_key, timeout)
+        result = _scan_folder_api(folder_id, api_key, timeout)
+        if result:
+            return result
+
     return _scan_folder_html(folder_id, timeout)
+
+
+def _scan_folder_gdown(folder_id):
+    """
+    List folder contents via gdown skip_download=True — no API key needed.
+    Returns {seq_id: file_id} for all .zip files, or {} on failure.
+    """
+    try:
+        import gdown
+    except ImportError:
+        return {}
+
+    try:
+        url = f"https://drive.google.com/drive/folders/{folder_id}"
+        files = gdown.download_folder(
+            url=url,
+            skip_download=True,
+            use_cookies=False,
+            quiet=True,
+        )
+    except Exception as e:
+        print(f"[gdrive] gdown folder scan failed: {e}")
+        return {}
+
+    if not files:
+        return {}
+
+    result = {}
+    for f in files:
+        name = getattr(f, 'path', '') or ''
+        name = os.path.basename(name)
+        fid  = getattr(f, 'id', '')
+        if name.endswith('.zip') and fid:
+            result[name.replace('.zip', '')] = fid
+
+    if result:
+        print(f"[gdrive] Found {len(result)} .zip file(s) via gdown")
+    return result
 
 
 def _scan_folder_api(folder_id, api_key, timeout=30):
@@ -156,7 +202,7 @@ def download_folder_all(folder_id, data_dir, quiet=False):
         output=data_dir,
         quiet=quiet,
         use_cookies=False,
-        remaining_ok=True,
+        resume=True,
     )
 
     zips = [p for p in (downloaded or []) if p.endswith(".zip")]
