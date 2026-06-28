@@ -1,6 +1,9 @@
 """
 train.py — Train YOLO v11n on FRED dataset (paper baseline).
 
+Images are loaded directly from zip files via a patched imread — no image
+files need to be on disk (only the small label .txt files are written).
+
 Two modes:
   --mode event   Train on event frames  → target ~87.68 mAP50
   --mode rgb     Train on RGB frames    → target ~76.23 mAP50
@@ -12,6 +15,7 @@ Run from ai_drone/Fred/:
 """
 
 import os
+import sys
 import argparse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +37,26 @@ if not os.path.exists(YAML_PATH):
         f"dataset.yaml not found — run build_dataset.py --mode {args.mode} first\n{YAML_PATH}"
     )
 
+# ── Patch Ultralytics imread to serve images from zip ─────────────────────────
+# Images are stored in zip files under data_from_fred/{seq}/...
+# build_dataset.py wrote paths pointing into the zip (virtual paths on disk).
+# multi_seq_imread transparently reads from the correct zip based on the path.
+
+sys.path.insert(0, os.path.join(HERE, '..', '4channel_project'))
+from zip_utils import multi_seq_imread
+
+import cv2 as _cv2
+
+def _patched_imread(path, flags=_cv2.IMREAD_COLOR):
+    return multi_seq_imread(path, flags)
+
+import ultralytics.utils.patches as _patches
+import ultralytics.data.base as _base
+_patches.imread = _patched_imread
+_base.imread    = _patched_imread
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 try:
     import torch
     GPU    = torch.cuda.is_available()
@@ -45,16 +69,14 @@ except ImportError:
 from ultralytics import YOLO
 
 last_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'last.pt')
-best_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'best.pt')
 
 if os.path.exists(last_pt):
-    print(f"Checkpoint found: {last_pt}")
-    print("Resuming training from last checkpoint...")
-    model = YOLO(last_pt)
+    print(f"Checkpoint found: {last_pt} — resuming")
+    model  = YOLO(last_pt)
     resume = True
 else:
-    print("No checkpoint found — starting fresh training...")
-    model = YOLO('yolo11n.pt')
+    print("No checkpoint — starting fresh")
+    model  = YOLO('yolo11n.pt')
     resume = False
 
 results = model.train(
