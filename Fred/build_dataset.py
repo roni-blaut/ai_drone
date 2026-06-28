@@ -7,6 +7,10 @@ Two modes:
   --mode rgb     Use PADDED_RGB/ JPGs + RGB_YOLO/ labels
                  → target: ~76.23 mAP50 (paper result for RGB)
 
+Reads data_from_fred/splits.yaml to determine which sequences go to train/val/test.
+Set percentages with:
+    python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+
 Run from ai_drone/Fred/:
     python build_dataset.py              # event camera mode
     python build_dataset.py --mode rgb   # RGB camera mode
@@ -14,22 +18,15 @@ Run from ai_drone/Fred/:
 
 import os
 import sys
-import glob
 import shutil
-import random
 import argparse
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-SEQ  = os.path.join(HERE, '..', 'data_from_fred', '7')
+HERE           = os.path.dirname(os.path.abspath(__file__))
+DATA_FROM_FRED = os.path.normpath(os.path.join(HERE, '..', 'data_from_fred'))
+SPLITS_YAML    = os.path.join(DATA_FROM_FRED, 'splits.yaml')
 
-# Zip-transparent file access (reads from 7.zip if folder not present)
 sys.path.insert(0, os.path.join(HERE, '..', '4channel_project'))
 from zip_utils import init_sequence, seq_glob, seq_exists, seq_open_lines
-
-init_sequence(SEQ)
-
-TRAIN_RATIO = 0.8
-RANDOM_SEED = 42
 
 
 def _copy_file(src, dst):
@@ -43,108 +40,113 @@ def _copy_file(src, dst):
 
 
 def build(mode='event'):
-    random.seed(RANDOM_SEED)
+    try:
+        import yaml as _yaml
+    except ImportError:
+        print("ERROR: pip install pyyaml"); return
+
+    if not os.path.isfile(SPLITS_YAML):
+        print(f"ERROR: splits.yaml not found: {SPLITS_YAML}")
+        print("Run: python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10")
+        return
+
+    with open(SPLITS_YAML) as f:
+        splits = _yaml.safe_load(f) or {}
 
     if mode == 'event':
-        img_dir   = os.path.join(SEQ, 'Event', 'Frames')
-        label_dir = os.path.join(SEQ, 'Event_YOLO')
-        img_ext   = '.png'
-        out_dir   = os.path.join(HERE, 'fred_yolo')
-        channels  = 3
+        out_dir = os.path.join(HERE, 'fred_yolo')
+        img_ext = '.png'
     else:
-        img_dir   = os.path.join(SEQ, 'PADDED_RGB')
-        label_dir = os.path.join(SEQ, 'RGB_YOLO')
-        img_ext   = '.jpg'
-        out_dir   = os.path.join(HERE, 'fred_rgb_yolo')
-        channels  = 3
+        out_dir = os.path.join(HERE, 'fred_rgb_yolo')
+        img_ext = '.jpg'
 
-    if not seq_exists(img_dir):
-        print(f"ERROR: {img_dir} not found"); return
-    if not seq_exists(label_dir):
-        print(f"ERROR: {label_dir} not found"); return
-
-    for split in ('train', 'val'):
+    for split in ('train', 'val', 'test'):
         os.makedirs(os.path.join(out_dir, 'images', split), exist_ok=True)
         os.makedirs(os.path.join(out_dir, 'labels', split), exist_ok=True)
 
-    img_files = seq_glob(img_dir, f'*{img_ext}')
-    if not img_files:
-        print(f"ERROR: No {img_ext} files in {img_dir}"); return
+    totals = {'train': 0, 'val': 0, 'test': 0}
+    n_drone = n_empty = n_skip = 0
 
-    print(f"Mode     : {mode.upper()}")
-    print(f"Images   : {len(img_files)} files from {img_dir}")
+    for split in ('train', 'val', 'test'):
+        seq_list = splits.get(split) or []
+        for seq_num in seq_list:
+            seq_dir = os.path.join(DATA_FROM_FRED, str(seq_num))
+            init_sequence(seq_dir)
 
-    # Find first non-empty label = start of drone recording
-    t_start_file = None
-    for img_path in img_files:
-        stem       = os.path.splitext(os.path.basename(img_path))[0]
-        label_path = os.path.join(label_dir, stem + '.txt')
-        if seq_exists(label_path) and ''.join(seq_open_lines(label_path)).strip():
-            t_start_file = img_path
-            break
+            if mode == 'event':
+                img_dir   = os.path.join(seq_dir, 'Event', 'Frames')
+                label_dir = os.path.join(seq_dir, 'Event_YOLO')
+            else:
+                img_dir   = os.path.join(seq_dir, 'PADDED_RGB')
+                label_dir = os.path.join(seq_dir, 'RGB_YOLO')
 
-    if t_start_file is None:
-        print("WARNING: No non-empty label found — using all frames")
-        t_start_file = img_files[0]
+            if not seq_exists(img_dir):
+                print(f"  WARNING: {img_dir} not found — skipping seq {seq_num}")
+                continue
 
-    print(f"Start    : {os.path.basename(t_start_file)} (first frame with drone)")
+            img_files = seq_glob(img_dir, f'*{img_ext}')
+            if not img_files:
+                print(f"  WARNING: No {img_ext} files in seq {seq_num} — skipping")
+                continue
 
-    n_train = n_val = n_drone = n_empty = n_skip = 0
-    recording = False
+            print(f"  Seq {seq_num:>4} → {split}  ({len(img_files)} frames)")
 
-    for img_path in img_files:
-        if img_path == t_start_file:
-            recording = True
-        if not recording:
-            n_skip += 1
-            continue
+            # Skip frames before first drone appearance (first non-empty label)
+            recording = False
+            for img_path in img_files:
+                stem       = os.path.splitext(os.path.basename(img_path))[0]
+                label_path = os.path.join(label_dir, stem + '.txt')
 
-        stem       = os.path.splitext(os.path.basename(img_path))[0]
-        label_path = os.path.join(label_dir, stem + '.txt')
+                if not recording:
+                    if seq_exists(label_path) and ''.join(seq_open_lines(label_path)).strip():
+                        recording = True
+                    else:
+                        n_skip += 1
+                        continue
 
-        if not seq_exists(label_path):
-            n_skip += 1
-            continue
+                if not seq_exists(label_path):
+                    n_skip += 1
+                    continue
 
-        split = 'train' if random.random() < TRAIN_RATIO else 'val'
+                # Prefix with seq number to avoid filename collisions across sequences
+                dst_stem = f"s{seq_num}_{stem}"
+                _copy_file(img_path,   os.path.join(out_dir, 'images', split, dst_stem + img_ext))
+                _copy_file(label_path, os.path.join(out_dir, 'labels', split, dst_stem + '.txt'))
 
-        _copy_file(img_path,   os.path.join(out_dir, 'images', split, stem + img_ext))
-        _copy_file(label_path, os.path.join(out_dir, 'labels', split, stem + '.txt'))
+                label_content = ''.join(seq_open_lines(label_path)).strip()
+                if label_content:
+                    n_drone += 1
+                else:
+                    n_empty += 1
 
-        label_content = ''.join(seq_open_lines(label_path)).strip()
-        if label_content:
-            n_drone += 1
-        else:
-            n_empty += 1
+                totals[split] += 1
 
-        if split == 'train':
-            n_train += 1
-        else:
-            n_val += 1
-
-    total = n_train + n_val
+    total = sum(totals.values())
     print(f"\nDataset  → {out_dir}")
-    print(f"  Train        : {n_train}")
-    print(f"  Val          : {n_val}")
+    print(f"  Train        : {totals['train']}")
+    print(f"  Val          : {totals['val']}")
+    print(f"  Test         : {totals['test']}")
     print(f"  With drone   : {n_drone}  ({100*n_drone/max(total,1):.0f}%)")
     print(f"  Empty labels : {n_empty}  ({100*n_empty/max(total,1):.0f}%)")
     print(f"  Skipped      : {n_skip}  (pre-recording + missing labels)")
 
-    _write_yaml(out_dir, channels, mode)
+    _write_yaml(out_dir, mode)
     print(f"\nNext step: python train.py --mode {mode}")
 
 
-def _write_yaml(out_dir, channels, mode):
+def _write_yaml(out_dir, mode):
     abs_dir = os.path.abspath(out_dir)
     desc    = "event frames (33ms)" if mode == 'event' else "RGB frames (30fps)"
-    yaml    = f"""# FRED Baseline Dataset — sequence 7, {desc}
+    yaml    = f"""# FRED Baseline Dataset — {desc}
 # Generated by Fred/build_dataset.py --mode {mode}
+# Sequence splits defined in data_from_fred/splits.yaml
 
 path:  {abs_dir}
 train: images/train
 val:   images/val
+test:  images/test
 
-channels: {channels}
+channels: 3
 nc: 1
 names: ['drone']
 """
