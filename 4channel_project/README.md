@@ -86,30 +86,32 @@ conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect
 There are 3 pipelines in this project. Run them from the `ai_drone/` root:
 
 ### Pipeline 1 — FRED event baseline (target: 87.68% mAP50)
-Uses pre-extracted 33ms event frames (Event/Frames/ PNGs, 3-channel). Multiple sequences,
-train/val/test split from splits.yaml (same file as Pipeline 3).
+Uses pre-extracted 33ms event frames already inside the zips (Event/Frames/ PNGs).
+**Images served directly from zip at training time — no PNG copying to disk.**
+Only small label .txt files are written to disk.
 ```powershell
 cd c:\ai_drone
-# Step 1 — assign sequences to splits (shared with Pipeline 3):
+# Step 1 — assign sequences to splits (shared with all pipelines):
 python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
 
-# Step 2 — copy frames to disk:
+# Step 2 — build index (labels to disk, images stay in zip):
 cd Fred
 python build_dataset.py
-# reads splits.yaml → copies Event/Frames/*.png + Event_YOLO/*.txt per sequence
-# → Fred/fred_yolo/images/{train,val,test}/  +  labels/{train,val,test}/
+# → writes Fred/fred_yolo/labels/{train,val,test}/*.txt  (label files only)
+# → writes Fred/fred_yolo/train.txt / val.txt / test.txt  (image path index)
+# → NO images copied to disk
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
-python train.py
+python train.py   # imread patched → images loaded from zip on demand
 python evaluate.py
 ```
 
 ### Pipeline 2 — FRED RGB baseline (target: 76.23% mAP50)
-Same as Pipeline 1 but uses RGB camera frames (PADDED_RGB/ JPGs).
+Same as Pipeline 1 using RGB frames (PADDED_RGB/ JPGs already in the zips).
 ```powershell
 # Uses same splits.yaml — run make_catalog.py --auto-split if not done yet
 cd Fred
 python build_dataset.py --mode rgb
-# → Fred/fred_rgb_yolo/images/{train,val,test}/  +  labels/{train,val,test}/
+# → Fred/fred_rgb_yolo/labels/ + index txt files only (no JPG copying)
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
 python evaluate.py --mode rgb
@@ -138,9 +140,13 @@ python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 
 # → writes splits.yaml first, then scans all zips → writes catalog.yaml
 # (or edit splits.yaml manually, then run make_catalog.py with no flags)
 
-# Step 2 — generate 4-channel images:
+# Step 2 — generate 4-channel images (written to disk — required, see note):
 python 4channel_project/dataset_builder.py
-# → reads splits.yaml, builds dataset/images/ + labels/
+# → parses events.raw per zip, computes 4 channels per 33ms window
+# → writes dataset/images/s{seq}_{t_us}.png + dataset/labels/*.txt
+# Note: unlike Pipeline 1/2, images must be generated and saved first.
+#   They don't exist in the zip. events.raw is sequential-only so
+#   on-the-fly generation during training is not feasible.
 
 # Step 3 — train:
 $env:KMP_DUPLICATE_LIB_OK="TRUE"

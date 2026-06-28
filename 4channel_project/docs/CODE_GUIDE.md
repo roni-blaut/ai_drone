@@ -11,35 +11,50 @@ https://github.com/miccunifi/FRED/tree/main
 
 ## Workflow
 
-**Scenario A — zips already in data_from_fred/**
+### How each pipeline handles images
+
+| | Pipeline 1 (event) | Pipeline 2 (RGB) | Pipeline 3 (4-ch) |
+|---|---|---|---|
+| Image source | Event/Frames/ PNGs in zip | PADDED_RGB/ JPGs in zip | Generated from events.raw |
+| Images on disk? | **No** — read from zip | **No** — read from zip | **Yes** — must be generated |
+| Labels on disk? | Yes (tiny .txt) | Yes (tiny .txt) | Yes (tiny .txt) |
+| Why different? | Files already exist in zip | Files already exist in zip | events.raw is sequential-only; on-the-fly generation during training is 5–50× too slow |
+
+Pipeline 1/2 patch `ultralytics imread` with `multi_seq_imread` (zip_utils.py) so
+YOLO loads images transparently from zip. Pipeline 3 cannot do this because the
+4-channel images don't exist in the zip and must be pre-computed.
+
+### Pipeline 3 full flow (Scenario A — zips already local)
 ```
 make_catalog.py --auto-split → splits.yaml + catalog.yaml  (one command does both)
-dataset_builder.py           → dataset/                    (4-channel PNGs + YOLO labels)
-train_4ch_yolo.py            → best.pt                     (trained model)
+dataset_builder.py           → dataset/images/*.png         (4-ch PNGs, generated once)
+                             → dataset/labels/*.txt         (YOLO labels)
+                             → dataset/train.txt / val.txt / test.txt
+train_4ch_yolo.py            → reads PNGs from disk → best.pt
 evaluate.py                  → mAP50
 ```
-`--auto-split` writes `splits.yaml` first, then runs the full catalog scan so
-`catalog.yaml` already reflects the new split assignments. One command, both files.
+`--auto-split` writes `splits.yaml` first, then scans zips → `catalog.yaml`. One command.
 
-To refresh the catalog without changing splits (e.g. after adding more zips):
+To refresh catalog without changing splits (e.g. after adding zips):
 ```
 make_catalog.py              → catalog.yaml only  (splits.yaml unchanged)
 ```
 
-**Scenario B — zips on Google Drive**
+### Pipeline 3 Scenario B — zips on Google Drive
 ```
 make_catalog.py --download-all               → downloads all zips, then Scenario A
   OR
-make_catalog.py --scan-drive                 → catalog.yaml with drive_file_id per sequence
-  edit splits.yaml to pick which sequences
-dataset_builder.py --download                → downloads missing zips, then builds dataset/
+make_catalog.py --scan-drive                 → adds drive_file_id to catalog.yaml
+  edit splits.yaml to pick sequences
+dataset_builder.py --download                → downloads missing zips + builds dataset/
 train_4ch_yolo.py + evaluate.py
 ```
 
 **Key file roles:**
-- `catalog.yaml` — metadata index (frame counts, Drive IDs). Read by `--download`, not by training.
-- `splits.yaml` — which sequence numbers → train / val / test. Read by `dataset_builder.py`.
-- `dataset/` — the actual training data (generated PNGs). Read by YOLO.
+- `catalog.yaml` — metadata index (frame counts, Drive IDs). Read by `--download`, not training.
+- `splits.yaml` — which sequences → train / val / test. Read by `dataset_builder.py` and `Fred/build_dataset.py`.
+- `dataset/` — pre-generated 4-channel PNGs. Read by YOLO during Pipeline 3 training.
+- `Fred/fred_yolo/` — label files + index txts only (no images). Pipeline 1 reads images from zip.
 
 ### What dataset_builder.py does per sequence
 
