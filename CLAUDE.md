@@ -177,18 +177,30 @@ python fred_step4_detect.py           # run inference
 ```
 
 ### Pipeline 1 — FRED event baseline (target: 87.68% mAP50)
+Uses pre-extracted 33ms event frames (Event/Frames/ PNGs). Multiple sequences,
+train/val/test split defined by splits.yaml (same file as Pipeline 3).
 ```powershell
+# Step 1 — assign sequences to splits (shared with Pipeline 3):
+python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+
+# Step 2 — copy frames from zips to disk:
 cd Fred
-python build_dataset.py               # reads directly from zip, copies frames to disk
+python build_dataset.py
+# → reads splits.yaml, copies Event/Frames/*.png + Event_YOLO/*.txt
+# → writes Fred/fred_yolo/images/{train,val,test}/ + labels/{train,val,test}/
+
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py
 python evaluate.py
 ```
 
 ### Pipeline 2 — FRED RGB baseline (target: 76.23% mAP50)
+Same as Pipeline 1 but uses RGB camera frames (PADDED_RGB/ JPGs).
 ```powershell
+# Uses same splits.yaml — run make_catalog.py --auto-split if not done yet
 cd Fred
 python build_dataset.py --mode rgb
+# → writes Fred/fred_rgb_yolo/images/{train,val,test}/ + labels/
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
 python evaluate.py --mode rgb

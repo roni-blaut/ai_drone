@@ -86,20 +86,30 @@ conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect
 There are 3 pipelines in this project. Run them from the `ai_drone/` root:
 
 ### Pipeline 1 — FRED event baseline (target: 87.68% mAP50)
-Replicates the FRED paper result using pre-extracted 33ms event frames (3-channel PNG).
+Uses pre-extracted 33ms event frames (Event/Frames/ PNGs, 3-channel). Multiple sequences,
+train/val/test split from splits.yaml (same file as Pipeline 3).
 ```powershell
-cd ai_drone\Fred
+cd c:\ai_drone
+# Step 1 — assign sequences to splits (shared with Pipeline 3):
+python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+
+# Step 2 — copy frames to disk:
+cd Fred
 python build_dataset.py
+# reads splits.yaml → copies Event/Frames/*.png + Event_YOLO/*.txt per sequence
+# → Fred/fred_yolo/images/{train,val,test}/  +  labels/{train,val,test}/
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py
 python evaluate.py
 ```
 
 ### Pipeline 2 — FRED RGB baseline (target: 76.23% mAP50)
-Same YOLO model on the RGB camera stream for comparison.
+Same as Pipeline 1 but uses RGB camera frames (PADDED_RGB/ JPGs).
 ```powershell
-cd ai_drone\Fred
+# Uses same splits.yaml — run make_catalog.py --auto-split if not done yet
+cd Fred
 python build_dataset.py --mode rgb
+# → Fred/fred_rgb_yolo/images/{train,val,test}/  +  labels/{train,val,test}/
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
 python evaluate.py --mode rgb
