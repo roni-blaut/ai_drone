@@ -1,14 +1,14 @@
-"""
-inspect_raw.py — General-purpose EVT3 data quality inspector.
+﻿"""
+inspect_raw.py â€” General-purpose EVT3 data quality inspector.
 
 Works on ANY events.raw file. Annotations file is optional.
 
 Auto-detects junk by looking for:
-  1. Scene change   — sudden event-rate spike at start (countdown, screen, flicker)
-  2. Hot pixels     — single pixels firing constantly across entire recording
-  3. Dead zones     — sensor regions that never fire
-  4. Rate spikes    — bursts of noise at any point in time
-  5. Polarity bias  — sustained >80% positive or negative (sensor fault)
+  1. Scene change   â€” sudden event-rate spike at start (countdown, screen, flicker)
+  2. Hot pixels     â€” single pixels firing constantly across entire recording
+  3. Dead zones     â€” sensor regions that never fire
+  4. Rate spikes    â€” bursts of noise at any point in time
+  5. Polarity bias  â€” sustained >80% positive or negative (sensor fault)
 
 Prints a verdict:  "Your clean data starts at t=X.Xs"
 
@@ -24,7 +24,9 @@ import os
 import argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
 from evt3_reader import EVT3Reader
 from config import RAW_FILE, IMG_W, IMG_H
@@ -36,7 +38,7 @@ except ImportError:
     print("ERROR: pip install matplotlib")
     sys.exit(1)
 
-# ── Args ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--raw', type=str, default=RAW_FILE,
@@ -48,7 +50,7 @@ args = parser.parse_args()
 print(f"Inspecting: {args.raw}")
 print(f"File size : {os.path.getsize(args.raw)/1e6:.1f} MB\n")
 
-# ── Load annotations (optional) ───────────────────────────────────────────────
+# â”€â”€ Load annotations (optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 ann_start = ann_end = None
 if args.ann and os.path.exists(args.ann):
@@ -61,11 +63,11 @@ if args.ann and os.path.exists(args.ann):
     ann_start = min(ann_times)
     ann_end   = max(ann_times)
     print(f"Annotations: {len(ann_times)} frames  "
-          f"t={ann_start:.2f}s – {ann_end:.2f}s\n")
+          f"t={ann_start:.2f}s â€“ {ann_end:.2f}s\n")
 else:
-    print("No annotations file — running without ground truth.\n")
+    print("No annotations file â€” running without ground truth.\n")
 
-# ── Stream full file ──────────────────────────────────────────────────────────
+# â”€â”€ Stream full file â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 print("Streaming file (may take ~60s for 127MB)...")
 
@@ -113,9 +115,9 @@ for t_start, events in reader.iter_windows(BUCKET_US):
         print(f"  t={t_sec:3d}s  {n/1e6:.2f}M events")
 
 print(f"\nTotal events : {total_events:,}")
-print(f"Time range   : {t_first:.2f}s – {t_last:.2f}s")
+print(f"Time range   : {t_first:.2f}s â€“ {t_last:.2f}s")
 
-# ── Junk detection ────────────────────────────────────────────────────────────
+# â”€â”€ Junk detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 times  = sorted(bucket_counts.keys())
 counts = np.array([bucket_counts[t] for t in times])
@@ -132,11 +134,11 @@ for t in times:
     conc = bucket_concentration.get(t, 0)
     pct_pos = 100 * pos / max(c, 1)
 
-    # Rule 1: event rate spike (>3σ above median)
+    # Rule 1: event rate spike (>3Ïƒ above median)
     if c > mean_rate + 3 * std_rate:
         issues.append((t, 'HIGH', f"t={t}s  rate spike: {c/1e6:.1f}M events (mean={mean_rate/1e6:.1f}M)"))
 
-    # Rule 2: spatial concentration >40% in top-1% pixels → text/screen/countdown
+    # Rule 2: spatial concentration >40% in top-1% pixels â†’ text/screen/countdown
     if conc > 0.40:
         issues.append((t, 'HIGH', f"t={t}s  screen/text detected: {conc*100:.0f}% events in top-1% pixels"))
 
@@ -146,7 +148,7 @@ for t in times:
     elif pct_pos < 20:
         issues.append((t, 'WARN', f"t={t}s  polarity bias: {100-pct_pos:.0f}% negative"))
 
-# ── Hot pixel report ──────────────────────────────────────────────────────────
+# â”€â”€ Hot pixel report â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 flat         = spatial_map.flatten()
 hot_thresh   = np.percentile(flat[flat > 0], 99.9)
@@ -154,7 +156,7 @@ hot_mask     = spatial_map > hot_thresh
 hot_yx       = np.argwhere(hot_mask)
 dead_count   = int((spatial_map == 0).sum())
 
-# ── Print verdict ─────────────────────────────────────────────────────────────
+# â”€â”€ Print verdict â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 print("\n" + "=" * 60)
 print("DATA QUALITY REPORT")
@@ -192,7 +194,7 @@ if high_times:
             print(f"  --> WARNING: junk ends at {clean_start}s "
                   f"but annotations start at {ann_start:.1f}s")
 else:
-    print("\n  No junk detected — data looks clean from t=0s")
+    print("\n  No junk detected â€” data looks clean from t=0s")
 
 print(f"\n  Hot pixels  : {len(hot_yx):,} pixels fire >99.9% of the time")
 print(f"  Dead pixels : {dead_count:,} ({100*dead_count/(IMG_W*IMG_H):.1f}% of sensor)")
@@ -201,13 +203,13 @@ print(f"  Polarity    : "
       f"{100*sum(bucket_neg.values())/max(total_events,1):.1f}% neg")
 print("=" * 60)
 
-# ── Plots ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Plots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 conc_vals = [bucket_concentration.get(t, 0) for t in times]
 
 fig, axes = plt.subplots(2, 2, figsize=(16, 10))
 fname = os.path.basename(args.raw)
-fig.suptitle(f"Data Quality — {fname}", fontsize=13, fontweight='bold')
+fig.suptitle(f"Data Quality â€” {fname}", fontsize=13, fontweight='bold')
 
 # Plot 1: Event rate + junk markers
 ax = axes[0, 0]
@@ -215,10 +217,10 @@ ax.plot(times, counts / 1e6, color='steelblue', linewidth=0.8, label='Event rate
 ax.axhline(mean_rate / 1e6, color='orange', linestyle='--', linewidth=1,
            label=f'Median {mean_rate/1e6:.1f}M')
 ax.axhline((mean_rate + 3*std_rate) / 1e6, color='red', linestyle='--',
-           linewidth=1, label='+3σ junk threshold')
+           linewidth=1, label='+3Ïƒ junk threshold')
 if ann_start:
     ax.axvspan(ann_start, ann_end, alpha=0.12, color='green',
-               label=f'Annotated {ann_start:.0f}s–{ann_end:.0f}s')
+               label=f'Annotated {ann_start:.0f}sâ€“{ann_end:.0f}s')
 for t, sev, _ in high_issues:
     ax.axvline(t, color='red', alpha=0.3, linewidth=1.5)
 ax.set_xlabel("Time (s)")

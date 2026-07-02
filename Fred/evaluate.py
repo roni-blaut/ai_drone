@@ -7,10 +7,14 @@ Run from ai_drone/Fred/:
 """
 
 import os
+import sys
 import argparse
 
 if __name__ == '__main__':
     HERE = os.path.dirname(os.path.abspath(__file__))
+
+    sys.path.insert(0, os.path.join(HERE, '..', 'common'))
+    from config import DEVICE
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', choices=['event', 'rgb'], default='event')
@@ -30,7 +34,7 @@ if __name__ == '__main__':
     from ultralytics import YOLO
 
     model   = YOLO(MODEL_PATH)
-    metrics = model.val(data=YAML_PATH, verbose=False)
+    metrics = model.val(data=YAML_PATH, device=DEVICE, verbose=False)
 
     map50   = metrics.box.map50 * 100
     map5095 = metrics.box.map   * 100

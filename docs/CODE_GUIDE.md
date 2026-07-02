@@ -1,4 +1,4 @@
-# 4-Channel Project — Code Guide
+﻿# 4-Channel Project — Code Guide
 
 Complete explanation of every file, every function, and how data flows through the pipeline.
 
@@ -9,6 +9,107 @@ https://drive.google.com/drive/folders/1pISIErXOx76xmCqkwhS3-azWOMlTKZMp?usp=sha
 https://github.com/miccunifi/FRED/tree/main
 
 
+## Workflow
+
+### How each pipeline handles images
+
+| | Pipeline 1 (event) | Pipeline 2 (RGB) | Pipeline 3 (4-ch) |
+|---|---|---|---|
+| Image source | Event/Frames/ PNGs in zip | PADDED_RGB/ JPGs in zip | Generated from events.raw |
+| Images on disk? | **No** — read from zip | **No** — read from zip | **Yes** — must be generated |
+| Labels on disk? | Yes (tiny .txt) | Yes (tiny .txt) | Yes (tiny .txt) |
+| Why different? | Files already exist in zip | Files already exist in zip | events.raw is sequential-only; on-the-fly generation during training is 5–50× too slow |
+
+Pipeline 1/2 patch `ultralytics imread` with `multi_seq_imread` (zip_utils.py) so
+YOLO loads images transparently from zip. Pipeline 3 cannot do this because the
+4-channel images don't exist in the zip and must be pre-computed.
+
+### build_index.py vs build_dataset.py — what's the difference?
+
+These two files have similar names but do fundamentally different things:
+
+| | `Fred/build_index.py` | `4channel_project/build_dataset.py` |
+|---|---|---|
+| **Input** | Pre-rendered PNGs/JPGs already inside the zip | Raw `events.raw` binary (must be parsed) |
+| **Processing** | Writes label `.txt` files; images stay in zip | EVT3 decode → noise filter → 4-channel generation → save PNGs |
+| **Output images** | 0 — images served from zip at train time | ~3,100 × N sequences new PNGs written to disk |
+| **Channels** | 3 (standard RGB or event frame) | 4 (pos / neg / rotor / time surface) |
+| **Label source** | `Event_YOLO/` or `RGB_YOLO/` (pre-annotated per frame) | `coordinates.txt` matched to 33ms time windows |
+| **Speed** | Fast (no computation, just file I/O) | Slow (signal processing per window) |
+| **Mental model** | "Make an index" | "Compute and save new data" |
+
+### Pipeline 3 full flow (Scenario A — zips already local)
+```
+make_catalog.py --auto-split → splits.yaml + catalog.yaml  (one command does both)
+build_dataset.py           → dataset/images/*.png         (4-ch PNGs, generated once)
+                             → dataset/labels/*.txt         (YOLO labels)
+                             → dataset/train.txt / val.txt / test.txt
+train_4ch_yolo.py            → reads PNGs from disk → best.pt
+evaluate.py                  → mAP50
+```
+`--auto-split` writes `splits.yaml` first, then scans zips → `catalog.yaml`. One command.
+
+To refresh catalog without changing splits (e.g. after adding zips):
+```
+make_catalog.py              → catalog.yaml only  (splits.yaml unchanged)
+```
+
+### Pipeline 3 Scenario B — zips on Google Drive
+```
+make_catalog.py --download-all               → downloads all zips, then Scenario A
+  OR
+make_catalog.py --scan-drive                 → adds drive_file_id to catalog.yaml
+  edit splits.yaml to pick sequences
+build_dataset.py --download                → downloads missing zips + builds dataset/
+train_4ch_yolo.py + evaluate.py
+```
+
+**Key file roles:**
+- `catalog.yaml` — metadata index (frame counts, Drive IDs). Read by `--download`, not training.
+- `splits.yaml` — which sequences → train / val / test. Read by `build_dataset.py` and `Fred/build_index.py`.
+- `dataset/` — pre-generated 4-channel PNGs. Read by YOLO during Pipeline 3 training.
+- `Fred/fred_yolo/` — label files + index txts only (no images). Pipeline 1 reads images from zip.
+
+### What build_dataset.py does per sequence
+
+Given `splits.yaml` with `train: [0, 1, 4, 7, 10, 31]`, it loops in that order:
+
+```
+For each seq in [0, 1, 4, 7, 10, 31]:
+  open data_from_fred/{seq}.zip   ← read-only, never extracted
+  read Event/events.raw (in-memory via BytesIO)
+  slice into 33ms windows starting at t=9.8s (drone appears)
+
+  for each window:
+    skip if:  zero events / in Removed_frames/ / all events filtered out
+    otherwise:
+      fast_filter()          → remove noise
+      generate_channels()    → 4 arrays (pos / neg / rotor / time surface)
+      save → dataset/images/s{seq}_{t_us:012d}.png   (4-ch RGBA, 720×1280)
+      save → dataset/labels/s{seq}_{t_us:012d}.txt   (YOLO bbox or empty)
+      append path → train.txt
+
+  zip file untouched — all output goes to dataset/
+```
+
+Result in `dataset/`:
+```
+images/s0_000009800000.png          labels/s0_000009800000.txt
+images/s0_000009833000.png          labels/s0_000009833000.txt
+...                                 ...
+images/s31_000025400000.png         labels/s31_000025400000.txt
+
+train.txt  ← absolute paths to all images from seqs 0,1,4,7,10,31
+val.txt    ← absolute paths to images from val sequences
+test.txt   ← absolute paths to images from test sequences
+dataset.yaml  ← channels:4, nc:1, names:[drone]
+```
+
+YOLO reads `train.txt` / `val.txt` / `test.txt` directly — it never sees `splits.yaml` or `catalog.yaml`.
+Filename prefix `s{seq}` guarantees no collisions across sequences.
+
+---
+
 ## Pipeline Overview
 
 ```
@@ -17,7 +118,7 @@ data_from_fred/splits.yaml    data_from_fred/N.zip (or folder N/)
         │                      zip_utils.py  ← transparent zip/folder access
         │                              │
         ▼                              ▼
-dataset_builder.py            evt3_reader.py  ← parse EVT3 binary (zip-aware)
+build_dataset.py            evt3_reader.py  ← parse EVT3 binary (zip-aware)
 (multi-sequence loop)                 │
         │                      filters.py     ← noise removal
         │                             │
@@ -36,12 +137,14 @@ train_4ch_yolo.py      ← patch YOLO first layer → train → best.pt
 evaluate.py            ← mAP50 vs paper baseline + ablation study
 ```
 
-All paths live in `config.py`. `zip_utils.init_sequence()` is called there on
+All paths live in `common/config.py`. `zip_utils.init_sequence()` is called there on
 import — all downstream scripts get transparent zip access automatically.
 
 ---
 
-## config.py
+## common/config.py
+
+**Location:** `common/config.py` — imported by all three pipelines (Fred/, 4channel_project/, tools/).
 
 **Purpose:** Single place for all settings. Auto-detects which environment you are running on.
 
@@ -81,7 +184,9 @@ Sets paths and training parameters accordingly:
 
 ---
 
-## zip_utils.py
+## common/zip_utils.py
+
+**Location:** `common/zip_utils.py` — imported by all three pipelines (Fred/, 4channel_project/, tools/).
 
 **Purpose:** Transparent access to FRED sequence data from `.zip` files or extracted folders.
 All scripts use the `seq_*` helpers instead of raw `glob`/`open`/`cv2.imread` calls.
@@ -170,7 +275,7 @@ Each event is reconstructed by combining the most recent ADDR_Y, ADDR_X, and tim
 
 **`iter_windows(window_us, t_start, t_end)`**
 - Generator that yields `(t_start, events)` for each consecutive time window
-- Used by `dataset_builder.py` to process the whole file efficiently
+- Used by `build_dataset.py` to process the whole file efficiently
 - Maintains a buffer across chunks so no events are missed at boundaries
 
 **`_get_file()`**
@@ -258,7 +363,7 @@ Convenience wrapper — applies refractory then BAF in correct order.
 ### Function: `fast_filter(events, tau_us)`
 
 Refractory only — no BAF. Faster, good enough for training data generation.
-Use this in `dataset_builder.py` where speed matters more than filter quality.
+Use this in `build_dataset.py` where speed matters more than filter quality.
 
 ---
 
@@ -366,7 +471,7 @@ Returns BGR image for OpenCV display/save.
 
 ---
 
-## dataset_builder.py
+## build_dataset.py
 
 **Purpose:** Read `events.raw` from one or more sequences, generate 4 channels per 33ms window, match annotations, save as YOLO training data.
 
@@ -395,7 +500,7 @@ Prints a summary of a built dataset without regenerating any images:
 - Line counts for `train.txt`, `val.txt`, `test.txt` + which sequences each contains
 - Filename collision check (all names must be unique)
 
-Run with `python dataset_builder.py --check`.
+Run with `python build_dataset.py --check`.
 
 ### Function: `build_multi_sequence(splits_yaml, output_dir, window_us, download=False)`
 
@@ -423,7 +528,7 @@ otherwise `coordinates.txt`. Uses `seq_exists()`.
 ### Function: `build_dataset(...)` *(legacy, single-sequence)*
 
 Random 80/20 per-frame split within sequence 7. Saves to `images/train/`, `images/val/`.
-Run with `python dataset_builder.py --single` to use this mode.
+Run with `python build_dataset.py --single` to use this mode.
 
 ### Function: `load_annotations(coords_file)`
 
@@ -483,7 +588,25 @@ lines in each `*.txt` index file. For legacy: counts files in `images/train/` et
 ## make_catalog.py
 
 **Purpose:** Scan `data_from_fred/*.zip`, read metadata from inside each zip, write
-`data_from_fred/catalog.yaml`. Run manually after adding new zips.
+`data_from_fred/catalog.yaml`. Run manually after adding new zips. Does **not** generate
+images and does **not** download anything — metadata only.
+
+### Default run (no flags) — `main()`
+
+Opens every `.zip` in `data_from_fred/`, reads without extracting:
+- `ts_shift_us` from the raw index header
+- `n_event_frames` / `n_event_yolo` / `n_rgb_frames` / `n_rgb_yolo` — file counts inside the zip
+- `zip_size_mb` from the file size on disk
+- `split` — looked up from `splits.yaml` (train/val/test/unassigned)
+
+Merges with any existing `catalog.yaml` so manually written `description` and
+`drive_file_id` fields are preserved. Re-run any time you add new zips or update
+`splits.yaml`.
+
+```powershell
+# Run from c:\ai_drone
+python common/make_catalog.py
+```
 
 ### Constant
 
@@ -519,7 +642,8 @@ Scans a public Google Drive folder via `gdrive.scan_folder()`, adds `drive_file_
 to each matching entry in `catalog.yaml`. Preserves all other fields.
 
 ```powershell
-python make_catalog.py --scan-drive
+python make_catalog.py --scan-drive               # no API key (uses gdown)
+python make_catalog.py --scan-drive --api-key AIza...   # reliable API key method
 ```
 
 ### CLI flags
@@ -531,22 +655,30 @@ python make_catalog.py --scan-drive
 | `--val N` | 20 | val % for --auto-split |
 | `--test N` | 10 | test % for --auto-split |
 | `--scan-drive` | off | scan Drive folder, add drive_file_id to catalog |
+| `--download-all` | off | download all zips from Drive (no API key, uses gdown) |
 | `--folder-id ID` | DRIVE_FOLDER_ID | override Drive folder ID |
+| `--api-key KEY` | None | Google API key for reliable folder listing |
 
 ---
 
 ## gdrive.py
 
-**Purpose:** Google Drive folder scan and lazy zip download. Used by `make_catalog.py
---scan-drive` and `dataset_builder.py --download`. Requires `pip install gdown`.
+**Purpose:** Google Drive folder scan and bulk/lazy zip download. Requires `pip install gdown`.
 
-### Function: `scan_folder(folder_id)`
+### Function: `scan_folder(folder_id, api_key=None)`
 
-Lists `.zip` files in a public Google Drive folder without an API key (parses the
-public HTML page). Returns `{seq_id: drive_file_id}` dict.
+Lists `.zip` files in a public Google Drive folder. Tries three methods in order:
+1. **gdown** (`skip_download=True`) — reliable, no API key needed (default)
+2. **Drive API v3** — if `api_key` is provided; handles large folders with pagination
+3. **HTML parsing** — last resort fallback; prints fix instructions if it fails
 
-Called by `make_catalog.py --scan-drive`. If Google changes their HTML format this
-may stop working; fall back to adding `drive_file_id` fields manually to catalog.yaml.
+Returns `{seq_id: drive_file_id}` dict. Called by `make_catalog.py --scan-drive`.
+
+### Function: `download_folder_all(folder_id, data_dir)`
+
+Downloads all `.zip` files from the Drive folder to `data_dir/` in one call using
+`gdown.download_folder(resume=True)`. No API key needed. Already-local files are
+skipped automatically via `resume=True`. Called by `make_catalog.py --download-all`.
 
 ### Function: `download_zip(seq_num, drive_file_id, data_dir)`
 
@@ -698,6 +830,58 @@ No manual path changes needed — `config.py` auto-detects Colab.
 
 ---
 
+## tools/
+
+Diagnostic and visualization utilities in `tools/` at the repo root.
+Run all scripts from `c:\ai_drone` as `python tools/<script>.py`.
+Each script adds both `common/` and `4channel_project/` to `sys.path` so it can
+import shared modules (`config`, `zip_utils`) and pipeline modules (`evt3_reader`, `channels`, etc.).
+
+| Script | Purpose |
+|---|---|
+| `sync_check.py` | Side-by-side Event/Frames+label vs PADDED_RGB+label; prints Δcx/Δcy |
+| `raw_label_check.py` | Render frames from `events.raw`, overlay Event_YOLO bbox; verify sync |
+| `raw_to_movie.py` | Compare Event/Frames/ PNG (left) vs raw reconstruction (right) |
+| `verify_frames.py` | Pixel-level MAE check between Frames/ PNGs and raw reconstruction |
+| `view_raw_events.py` | Live viewer for raw event stream with annotated/removed frame highlights |
+| `debug_filter_preview.py` | 4-channel before/after refractory filter comparison PNG |
+| `find_offset.py` | Print first EVT3 timestamp vs first Frames/ filename to find ts_shift |
+| `inspect_raw.py` | EVT3 data quality report: hot pixels, rate spikes, polarity bias |
+| `make_filter_movie.py` | 2×2 grid video comparing raw vs filtered event channels |
+
+### tools/raw_label_check.py
+
+Renders 33ms windows directly from `events.raw` (no pre-extracted PNGs) and overlays
+the matching `Event_YOLO/` bounding box. Useful for verifying timestamp sync after
+any change to `ts_shift_us` or the EVT3 reader.
+
+Banner colours:
+- **GREEN** — label matched, box drawn; prints `cx cy w h Δt`
+- **ORANGE** — label file exists but empty (drone out of frame)
+- **RED** — no Event_YOLO file within ±16ms
+- **GREY** — window outside annotated range
+
+```powershell
+cd c:\ai_drone
+python tools/raw_label_check.py                  # sequence 7, full run
+python tools/raw_label_check.py --start 9.8     # jump to drone segment
+python tools/raw_label_check.py --seq 4         # sequence 4 (from 4.zip)
+python tools/raw_label_check.py --save out.mp4  # also save video
+```
+Controls: `SPACE`=pause/resume  `A/←`=prev  `D/→`=+10  `Q/ESC`=quit
+
+### Adding new tools
+
+Every script in `tools/` must include this at the top (after the docstring):
+```python
+import sys, os
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
+```
+
+---
+
 ## Data formats used across files
 
 ### Structured event array (output of evt3_reader, input to filters and channels)
@@ -713,7 +897,7 @@ shape = (4, 720, 1280)   # 4 channels, height, width
 values = [0.0, 1.0]      # normalized
 ```
 
-### Saved image format (output of dataset_builder.py)
+### Saved image format (output of build_dataset.py)
 ```python
 # Saved as RGBA PNG — PIL mode='RGBA', uint8 per channel
 shape = (720, 1280, 4)   # H, W, C — PIL/numpy convention
@@ -748,14 +932,16 @@ runs/fred_4channel/
 | Issue | Symptom | Fix |
 |---|---|---|
 | OpenMP DLL conflict | `OMP: Error #15` on Windows | `$env:KMP_DUPLICATE_LIB_OK="TRUE"` |
-| Old .npy dataset | `No images found` error | Delete `dataset/` folder and rerun `dataset_builder.py` |
+| Old .npy dataset | `No images found` error | Delete `dataset/` folder and rerun `build_dataset.py` |
 | Wrong channel count | Layer 0 shows `[3, 16, 3, 2]` | Ensure `channels: 4` in `dataset.yaml` and no old checkpoint loaded |
 | fbgemm.dll error | PyTorch DLL load failure | Install Visual C++ Redistributable from aka.ms/vs/17/release/vc_redist.x64.exe |
-| Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python dataset_builder.py` |
+| Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python build_dataset.py` |
 | Sequence not found | `FileNotFoundError: Zip file not found` | Add `N.zip` to `data_from_fred/` or update `splits.yaml` |
+| Drive scan finds no files | `HTML parsing found no .zip files` | `--scan-drive` now uses gdown by default (no API key needed); if still failing, add `--api-key AIza...` |
+| Drive download arg error | `unexpected keyword argument 'remaining_ok'` | Update gdrive.py — fixed in commit a995d75 |
 | Drive download fails | `ImportError: gdown is required` | `pip install gdown` |
 | Drive file IDs missing | `no drive_file_id in catalog` | Run `python make_catalog.py --scan-drive` |
 
 ---
 
-*Code Guide — 4-Channel Drone Detection Project — Updated June 2026*
+*Code Guide — 4-Channel Drone Detection Project — Updated July 2026*

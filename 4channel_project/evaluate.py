@@ -21,6 +21,7 @@ import sys
 import argparse
 import numpy as np
 import torch
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'common'))
 
 from config import (
     DATASET_DIR, RUNS_DIR, RUN_NAME,
@@ -152,7 +153,7 @@ def _train_ablation(label, channel_indices):
     # TODO: need to build a dataset with only the selected channels
     # For now, train on the full dataset and note which channels are used
     # A proper ablation would rebuild the dataset with only selected channels
-    # This is left as an exercise — see dataset_builder.py
+    # This is left as an exercise — see build_dataset.py
 
     print(f"  NOTE: Full ablation requires rebuilding dataset with "
           f"channels {[i+1 for i in channel_indices]} only.")

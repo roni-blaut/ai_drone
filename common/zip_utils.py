@@ -194,3 +194,55 @@ def seq_exists(path):
         prefix = member.rstrip('/') + '/'
         return any(n.startswith(prefix) for n in _ACTIVE_SEQ._names)
     return os.path.exists(path)
+
+
+# ── Multi-sequence zip cache (for Pipeline 1 / 2 training) ───────────────────
+
+_ZIP_CACHE: dict = {}   # normalized seq_dir → ZipSequence
+
+
+def _get_seq_zip(seq_dir):
+    """Return a cached ZipSequence for seq_dir, or None if it's a real folder."""
+    key = os.path.normpath(seq_dir)
+    if key in _ZIP_CACHE:
+        return _ZIP_CACHE[key]
+    if os.path.isdir(key):
+        return None
+    zip_path = key + '.zip'
+    if os.path.isfile(zip_path):
+        zs = ZipSequence(zip_path, key)
+        _ZIP_CACHE[key] = zs
+        return zs
+    return None
+
+
+def multi_seq_imread(path, flags=None):
+    """
+    cv2.imread replacement that works across multiple sequence zips simultaneously.
+
+    Intended for YOLO training (Pipeline 1/2) where images from several sequences
+    are loaded in random order.  The path must contain data_from_fred/{seq_num}/
+    so the correct zip can be auto-detected.
+
+    Falls back to cv2.imread for real on-disk files.
+    """
+    import cv2
+    if flags is None:
+        flags = cv2.IMREAD_COLOR
+    if os.path.isfile(path):
+        return cv2.imread(path, flags)
+
+    norm  = os.path.normpath(path)
+    parts = norm.split(os.sep)
+    for i, part in enumerate(parts):
+        if part == 'data_from_fred' and i + 1 < len(parts):
+            seq_dir = os.sep.join(parts[:i + 2])
+            zs = _get_seq_zip(seq_dir)
+            if zs:
+                try:
+                    return zs.imread(path, flags)
+                except Exception:
+                    pass
+            break
+
+    return cv2.imread(path, flags)

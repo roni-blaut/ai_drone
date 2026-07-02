@@ -1,17 +1,17 @@
-"""
-make_filter_movie.py — Live OpenCV viewer: before vs after filter.
+﻿"""
+make_filter_movie.py â€” Live OpenCV viewer: before vs after filter.
 
 Each frame = one 33ms event window shown as a 4-channel 2x2 grid.
 Left panel = raw noisy events.  Right panel = after refractory filter.
 
 Controls:
-    SPACE  — pause / resume
-    →      — step one frame forward (while paused)
-    Q/ESC  — quit
+    SPACE  â€” pause / resume
+    â†’      â€” step one frame forward (while paused)
+    Q/ESC  â€” quit
 
 Usage:
     cd 4channel_project
-    python make_filter_movie.py                      # drone segment 9.87s–35s
+    python make_filter_movie.py                      # drone segment 9.87sâ€“35s
     python make_filter_movie.py --start 0 --end 10   # first 10 seconds
     python make_filter_movie.py --delay 50           # ms per frame (default 33)
 """
@@ -21,7 +21,9 @@ import os
 import argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
 from evt3_reader import EVT3Reader
 from filters import fast_filter
@@ -34,11 +36,11 @@ except ImportError:
     print("ERROR: pip install opencv-python")
     sys.exit(1)
 
-# ── CLI args ──────────────────────────────────────────────────────────────────
+# â”€â”€ CLI args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--start', type=float, default=9.87,
-                    help='Start time in seconds (default: 9.87 — drone appears)')
+                    help='Start time in seconds (default: 9.87 â€” drone appears)')
 parser.add_argument('--end',   type=float, default=35.0,
                     help='End time in seconds (default: 35.0)')
 parser.add_argument('--delay', type=int,   default=33,
@@ -50,7 +52,7 @@ T_START_US = int(args.start * 1_000_000)
 T_END_US   = int(args.end   * 1_000_000)
 DELAY_MS   = args.delay
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def add_banner(img, title, subtitle=""):
     bar = np.zeros((50, img.shape[1], 3), dtype=np.uint8)
@@ -116,10 +118,10 @@ def build_frame(raw_events, clean_events, t_start):
     frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
     return frame
 
-# ── Pre-load all frames ───────────────────────────────────────────────────────
+# â”€â”€ Pre-load all frames â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-print(f"Loading {args.start:.2f}s – {args.end:.2f}s ...")
-print("(building frames — this may take ~30s for a long segment)\n")
+print(f"Loading {args.start:.2f}s â€“ {args.end:.2f}s ...")
+print("(building frames â€” this may take ~30s for a long segment)\n")
 
 reader = EVT3Reader(RAW_FILE)
 frames = []
@@ -137,12 +139,12 @@ for t_start, raw_events in reader.iter_windows(WINDOW_US,
     if len(frames) % 30 == 0:
         print(f"  {len(frames)} frames ready  "
               f"t={t_start/1e6:.2f}s  "
-              f"{len(raw_events):,} → {len(clean_events):,} events")
+              f"{len(raw_events):,} â†’ {len(clean_events):,} events")
 
 print(f"\n{len(frames)} frames loaded. Opening viewer...")
-print("Controls:  SPACE=pause/resume   →=step frame   Q/ESC=quit\n")
+print("Controls:  SPACE=pause/resume   â†’=step frame   Q/ESC=quit\n")
 
-# ── Playback ──────────────────────────────────────────────────────────────────
+# â”€â”€ Playback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 cv2.namedWindow("Before vs After Filter", cv2.WINDOW_NORMAL)
 
@@ -157,14 +159,14 @@ while True:
 
     key = cv2.waitKey(1 if paused else DELAY_MS) & 0xFF
 
-    if key == ord('q') or key == 27:       # Q or ESC — quit
+    if key == ord('q') or key == 27:       # Q or ESC â€” quit
         break
-    elif key == ord(' '):                  # SPACE — pause/resume
+    elif key == ord(' '):                  # SPACE â€” pause/resume
         paused = not paused
         print("Paused" if paused else "Playing")
-    elif key == 83 or key == ord('d'):     # → arrow or D — step forward
+    elif key == 83 or key == ord('d'):     # â†’ arrow or D â€” step forward
         i += 1
-    elif key == 81 or key == ord('a'):     # ← arrow or A — step back
+    elif key == 81 or key == ord('a'):     # â† arrow or A â€” step back
         i = max(0, i - 1)
     elif not paused:
         i += 1

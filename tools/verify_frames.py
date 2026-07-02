@@ -1,5 +1,5 @@
-"""
-verify_frames.py — Measure pixel-level match between events.raw and Event/Frames/.
+﻿"""
+verify_frames.py â€” Measure pixel-level match between events.raw and Event/Frames/.
 
 For N evenly-spaced frames, reconstructs each from events.raw and computes
 Mean Absolute Error vs the original Frames/ PNG.
@@ -18,7 +18,9 @@ Usage:
 import sys, os, argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 from evt3_reader import EVT3Reader
 from config import IMG_W, IMG_H, WINDOW_US
 from zip_utils import init_sequence, seq_glob, seq_imread
@@ -28,7 +30,7 @@ try:
 except ImportError:
     print("ERROR: pip install opencv-python"); sys.exit(1)
 
-# ── Args ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seq',   default='7')
@@ -43,14 +45,14 @@ FRAMES_DIR = os.path.join(BASE, 'Event', 'Frames')
 
 init_sequence(BASE)
 
-# ── Load ts_shift_us ──────────────────────────────────────────────────────────
+# â”€â”€ Load ts_shift_us â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 reader  = EVT3Reader(RAW_FILE)
 SKIP_US = reader.ts_shift_us
-print(f"ts_shift_us = {SKIP_US:,} µs ({SKIP_US/1e6:.3f} s)")
+print(f"ts_shift_us = {SKIP_US:,} Âµs ({SKIP_US/1e6:.3f} s)")
 print(f"Raw window:   raw_t = frames_t + {SKIP_US/1e6:.3f}s\n")
 
-# ── Load Frames/ index (numeric sort) ─────────────────────────────────────────
+# â”€â”€ Load Frames/ index (numeric sort) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 all_pairs  = sorted([(int(os.path.basename(p).split('_frame_')[1][:-4]), p)
                       for p in seq_glob(FRAMES_DIR, '*.png')])
@@ -65,11 +67,11 @@ in_range = [(t, p) for t, p in zip(frame_ts, frame_paths) if start_us <= t <= en
 step     = max(1, len(in_range) // args.n)
 samples  = in_range[::step][:args.n]
 
-print(f"Checking {len(samples)} frames  t={args.start:.1f}s – {args.end:.1f}s\n")
+print(f"Checking {len(samples)} frames  t={args.start:.1f}s â€“ {args.end:.1f}s\n")
 print(f"{'Frame time':>12}  {'Events':>8}  {'MAE':>7}  Result")
 print("-" * 50)
 
-# ── Reconstruct and compare ───────────────────────────────────────────────────
+# â”€â”€ Reconstruct and compare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def reconstruct(evs):
     pos = np.zeros((IMG_H, IMG_W), dtype=np.float32)
@@ -96,7 +98,7 @@ for frames_t, frames_path in samples:
     mae   = float(np.mean(np.abs(recon.astype(int) - orig.astype(int))))
     maes.append(mae)
 
-    grade = "✓ good" if mae < 10 else ("~ ok" if mae < 25 else "✗ mismatch")
+    grade = "âœ“ good" if mae < 10 else ("~ ok" if mae < 25 else "âœ— mismatch")
     print(f"{frames_t/1e6:>12.3f}s  {len(evs):>8,}  {mae:>7.1f}  {grade}")
 
     # thumbnail for contact sheet
@@ -117,20 +119,20 @@ for frames_t, frames_path in samples:
     ])])
     panels.append(panel)
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# â”€â”€ Summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 print("-" * 50)
 print(f"Mean MAE : {np.mean(maes):.1f}   Median: {np.median(maes):.1f}   "
       f"Max: {np.max(maes):.1f}")
 print()
 if np.mean(maes) < 10:
-    print("✓  ALIGNED  — raw reconstruction matches Frames/ well")
+    print("âœ“  ALIGNED  â€” raw reconstruction matches Frames/ well")
 elif np.mean(maes) < 25:
-    print("~  CLOSE    — minor differences (normalization or hot pixels)")
+    print("~  CLOSE    â€” minor differences (normalization or hot pixels)")
 else:
-    print("✗  MISMATCH — timestamps are still off")
+    print("âœ—  MISMATCH â€” timestamps are still off")
 
-# ── Contact sheet: original | reconstructed | diff (×3) ──────────────────────
+# â”€â”€ Contact sheet: original | reconstructed | diff (Ã—3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 cols = 5
 rows_n = (len(panels) + cols - 1) // cols
@@ -143,7 +145,7 @@ sheet = np.vstack([np.hstack(panels[i*cols:(i+1)*cols]) for i in range(rows_n)])
 out = "./verify_frames_output.png"
 cv2.imwrite(out, sheet)
 print(f"\nContact sheet saved: {os.path.abspath(out)}")
-print("Columns per frame: original | reconstructed | diff (×3 brightness)")
+print("Columns per frame: original | reconstructed | diff (Ã—3 brightness)")
 
 cv2.namedWindow("Verify Frames", cv2.WINDOW_NORMAL)
 cv2.imshow("Verify Frames", sheet)

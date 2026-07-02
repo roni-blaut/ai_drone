@@ -30,7 +30,10 @@ Usage:
     # ch.shape == (4, 720, 1280)
 """
 
+import os
+import sys
 import numpy as np
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'common'))
 from config import IMG_W, IMG_H, ROTOR_THRESHOLD, DEBUG_MODE, DEBUG_SAMPLES
 
 _generate_debug_count = 0
