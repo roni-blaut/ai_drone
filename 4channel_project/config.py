@@ -18,6 +18,9 @@ To force a specific environment (overrides auto-detect):
 
 import os
 
+_CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_ROOT  = os.path.normpath(os.path.join(_CONFIG_DIR, '..', 'data_from_fred'))
+
 # ── Torch — optional at config load time ─────────────────────────────────────
 
 try:
@@ -78,15 +81,15 @@ elif ENV == 'nvidia':
 
 elif ENV == 'cpu':
     # CPU only — same paths as local but slower settings applied below
-    SEQUENCE_DIR = "../data_from_fred/7"
-    DATASET_DIR  = "./dataset"
-    RUNS_DIR     = "./runs"
+    SEQUENCE_DIR = os.path.join(_DATA_ROOT, "7")
+    DATASET_DIR  = os.path.join(_CONFIG_DIR, "dataset")
+    RUNS_DIR     = os.path.join(_CONFIG_DIR, "runs")
 
 else:
     # Local PC — Windows VS Code
-    SEQUENCE_DIR = "../data_from_fred/7"
-    DATASET_DIR  = "./dataset"
-    RUNS_DIR     = "./runs"
+    SEQUENCE_DIR = os.path.join(_DATA_ROOT, "7")
+    DATASET_DIR  = os.path.join(_CONFIG_DIR, "dataset")
+    RUNS_DIR     = os.path.join(_CONFIG_DIR, "runs")
 
 # Initialise zip or real-folder access for SEQUENCE_DIR
 import sys as _sys
