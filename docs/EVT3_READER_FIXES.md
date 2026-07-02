@@ -1,4 +1,4 @@
-# EVT3 Reader Fixes
+﻿# EVT3 Reader Fixes
 
 Two bugs were found and fixed in `evt3_reader.py` that caused incorrect timestamps
 when reading Prophesee EVT3 raw files.
@@ -125,5 +125,5 @@ same displayed timestamp. `verify_frames.py` reports MAE < 10 across all frames.
 | ts_shift | SDK applies 1.163s clock offset to Frames/ | Raw 1 second behind Frames/ | Skip first `ts_shift_us` µs; offset Frames/ lookup |
 
 Both fixes are in `evt3_reader.py` and `raw_to_movie.py`. All downstream scripts
-(`dataset_builder.py`, `make_filter_movie.py`, `view_raw_events.py`) benefit
+(`build_dataset.py`, `make_filter_movie.py`, `view_raw_events.py`) benefit
 automatically because they all use `EVT3Reader`.

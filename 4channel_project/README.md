@@ -1,4 +1,4 @@
-# FRED 4-Channel Drone Detection
+﻿# FRED 4-Channel Drone Detection
 
 Physics-driven multi-channel event camera input for improved drone detection.
 Extends the FRED paper (87.68 mAP50) with 4 physically motivated channels.
@@ -20,19 +20,15 @@ No channel is redundant. Each carries independent physical information.
 ## File Structure
 
 ```
-4channel_project/
-├── config.py           ← All settings; calls init_sequence() on import
-├── zip_utils.py        ← Transparent zip/folder access (seq_glob, seq_imread…)
-├── evt3_reader.py      ← Parse Prophesee EVT3 binary (zip-aware via BytesIO)
-├── filters.py          ← Refractory + BAF noise filters
-├── channels.py         ← Generate 4 channels from filtered events
-├── dataset_builder.py  ← Build YOLO dataset (multi-sequence from splits.yaml)
-├── make_catalog.py     ← Scan data_from_fred/*.zip → write catalog.yaml
-├── gdrive.py           ← Google Drive folder scan + lazy zip download
-├── train_4ch_yolo.py   ← Train YOLO with modified 4-channel input
-├── evaluate.py         ← Evaluate and compare vs paper baseline
-├── requirements.txt    ← pip requirements
-├── environment.yml     ← conda environment
+ai_drone/
+├── common/             ← shared modules (used by all pipelines)
+│   ├── config.py           ← All settings; calls init_sequence() on import
+│   ├── zip_utils.py        ← Transparent zip/folder access (seq_glob, seq_imread…)
+│   └── make_catalog.py     ← Scan zips → catalog.yaml + splits.yaml (shared setup tool)
+├── docs/               ← documentation & research notes
+│   ├── CODE_GUIDE.md       ← full function-by-function documentation
+│   ├── flow_chart.md       ← pipeline flow diagram
+│   └── …
 ├── tools/              ← diagnostic & visualization utilities
 │   ├── sync_check.py       ← verify event↔RGB sync with side-by-side bbox overlay
 │   ├── raw_label_check.py  ← verify events.raw sync with Event_YOLO labels
@@ -43,18 +39,23 @@ No channel is redundant. Each carries independent physical information.
 │   ├── find_offset.py      ← find time offset between event/RGB streams
 │   ├── inspect_raw.py      ← inspect EVT3 raw file contents
 │   └── make_filter_movie.py ← render filter comparison video
-├── docs/               ← documentation & research notes
-│   ├── CODE_GUIDE.md       ← full function-by-function documentation
-│   ├── flow_chart.md       ← pipeline flow diagram
-│   └── …
-└── notebooks/          ← Jupyter notebooks
-    └── colab_run.ipynb     ← Google Colab notebook (T4 GPU)
-
-data_from_fred/
-├── splits.yaml         ← which sequence numbers go to train / val / test
-├── catalog.yaml        ← auto-generated metadata for every zip (run make_catalog.py)
-├── 7.zip               ← sequence data (or extracted as 7/)
-└── 4.zip, 10.zip …     ← additional sequences (~100 total)
+├── data_from_fred/
+│   ├── splits.yaml         ← which sequence numbers go to train / val / test
+│   ├── catalog.yaml        ← auto-generated metadata for every zip (run make_catalog.py)
+│   ├── 7.zip               ← sequence data (or extracted as 7/)
+│   └── 4.zip, 10.zip …     ← additional sequences (~100 total)
+└── 4channel_project/
+    ├── evt3_reader.py      ← Parse Prophesee EVT3 binary (zip-aware via BytesIO)
+    ├── filters.py          ← Refractory + BAF noise filters
+    ├── channels.py         ← Generate 4 channels from filtered events
+    ├── build_dataset.py  ← Build YOLO dataset (multi-sequence from splits.yaml)
+    ├── gdrive.py           ← Google Drive folder scan + lazy zip download
+    ├── train_4ch_yolo.py   ← Train YOLO with modified 4-channel input
+    ├── evaluate.py         ← Evaluate and compare vs paper baseline
+    ├── requirements.txt    ← pip requirements
+    ├── environment.yml     ← conda environment
+    └── notebooks/          ← Jupyter notebooks
+        └── colab_run.ipynb     ← Google Colab notebook (T4 GPU)
 ```
 
 ## Setup
@@ -92,11 +93,11 @@ Only small label .txt files are written to disk.
 ```powershell
 cd c:\ai_drone
 # Step 1 — assign sequences to splits (shared with all pipelines):
-python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
 
 # Step 2 — build index (labels to disk, images stay in zip):
 cd Fred
-python build_dataset.py
+python build_index.py
 # → writes Fred/fred_yolo/labels/{train,val,test}/*.txt  (label files only)
 # → writes Fred/fred_yolo/train.txt / val.txt / test.txt  (image path index)
 # → NO images copied to disk
@@ -110,7 +111,7 @@ Same as Pipeline 1 using RGB frames (PADDED_RGB/ JPGs already in the zips).
 ```powershell
 # Uses same splits.yaml — run make_catalog.py --auto-split if not done yet
 cd Fred
-python build_dataset.py --mode rgb
+python build_index.py --mode rgb
 # → Fred/fred_rgb_yolo/labels/ + index txt files only (no JPG copying)
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
@@ -136,12 +137,12 @@ Our approach: reads `events.raw` directly from zip, builds 4 physics-motivated c
 cd c:\ai_drone
 
 # Step 1 — assign splits AND index in one command:
-python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
 # → writes splits.yaml first, then scans all zips → writes catalog.yaml
 # (or edit splits.yaml manually, then run make_catalog.py with no flags)
 
 # Step 2 — generate 4-channel images (written to disk — required, see note):
-python 4channel_project/dataset_builder.py
+python 4channel_project/build_dataset.py
 # → parses events.raw per zip, computes 4 channels per 33ms window
 # → writes dataset/images/s{seq}_{t_us}.png + dataset/labels/*.txt
 # Note: unlike Pipeline 1/2, images must be generated and saved first.
@@ -161,14 +162,14 @@ python 4channel_project/evaluate.py
 cd c:\ai_drone
 
 # Option B1 — download everything at once (simplest, no API key):
-python 4channel_project/make_catalog.py --download-all
+python common/make_catalog.py --download-all
 # → downloads all zips to data_from_fred/, then runs catalog scan
 # Continue from Scenario A Step 2.
 
 # Option B2 — selective (only what splits.yaml needs):
-python 4channel_project/make_catalog.py --scan-drive   # Drive file IDs → catalog.yaml
+python common/make_catalog.py --scan-drive   # Drive file IDs → catalog.yaml
 # edit data_from_fred/splits.yaml to pick sequences
-python 4channel_project/dataset_builder.py --download  # downloads missing zips + builds
+python 4channel_project/build_dataset.py --download  # downloads missing zips + builds
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python 4channel_project/train_4ch_yolo.py
 python 4channel_project/evaluate.py
@@ -176,7 +177,7 @@ python 4channel_project/evaluate.py
 
 Verify split counts without rebuilding:
 ```powershell
-python 4channel_project/dataset_builder.py --check
+python 4channel_project/build_dataset.py --check
 ```
 
 ### Google Colab (Pipeline 3, T4 GPU — recommended)
@@ -214,10 +215,10 @@ python make_catalog.py --auto-split --train 70 --val 20 --test 10
 # Or edit data_from_fred/splits.yaml manually.
 
 # Build from all sequences in splits.yaml:
-python dataset_builder.py
+python build_dataset.py
 
 # Verify split counts without regenerating:
-python dataset_builder.py --check
+python build_dataset.py --check
 ```
 For each sequence in `splits.yaml` (train first, then val, then test):
 - Opens the zip **in-memory** (never extracted to disk)
@@ -239,15 +240,15 @@ python make_catalog.py --download-all
 
 # Option B — selective (only what splits.yaml needs):
 python make_catalog.py --scan-drive          # scan folder → save file IDs to catalog.yaml
-python dataset_builder.py --download         # download only missing zips, then build
+python build_dataset.py --download         # download only missing zips, then build
 
 # Option C — scan with a free Google API key (most reliable):
 python make_catalog.py --scan-drive --api-key AIza...
-python dataset_builder.py --download
+python build_dataset.py --download
 ```
 Zips already present are never re-downloaded.
 
-Legacy single-sequence mode (seq 7 only): `python dataset_builder.py --single`
+Legacy single-sequence mode (seq 7 only): `python build_dataset.py --single`
 
 ### Step 4 — Train
 ```powershell

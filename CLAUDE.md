@@ -1,4 +1,4 @@
-# Drone Detection Project — Context for Claude
+﻿# Drone Detection Project — Context for Claude
 
 ## What this project is
 
@@ -45,6 +45,10 @@ ai_drone/                              ← git root (this folder)
 ├── fred_step4_detect.py               ← run inference (simplified pipeline)
 ├── pid_annotation_fft.py              ← PID frequency analysis on annotation centroids
 ├── pid_annotation_fft.png             ← FFT output (9.14 Hz PID peak)
+├── common/                            ← shared modules used by all pipelines
+│   ├── config.py                      ← all settings; calls init_sequence() on import
+│   ├── zip_utils.py                   ← transparent zip/folder access (seq_glob, seq_imread…)
+│   └── make_catalog.py                ← scan zips → catalog.yaml + splits.yaml (shared setup tool)
 ├── data_from_fred/                    ← FRED dataset sequences (zip or extracted folders)
 │   ├── splits.yaml                    ← which sequence numbers go to train/val/test
 │   ├── catalog.yaml                   ← auto-generated metadata for every zip sequence
@@ -61,18 +65,33 @@ ai_drone/                              ← git root (this folder)
 │       ├── coordinates.txt            ← ground truth bbox annotations
 │       ├── interpolated_coordinates.txt ← smoother float bboxes (preferred)
 │       └── tracks.txt                 ← drone track metadata
+├── docs/                              ← documentation & research notes
+│   ├── CODE_GUIDE.md                  ← developer guide for 4-channel pipeline
+│   ├── EVT3_READER_FIXES.md           ← EVT3 parser bug history
+│   ├── drone_detection_research_summary.md ← full research notes
+│   ├── FRED_EventCamera_Discussion.md ← research discussion notes
+│   ├── flow_chart.md                  ← pipeline flow diagram
+│   ├── TODO.md                        ← team task list
+│   └── channel_preview.png            ← sample 4-channel output image
+├── tools/                             ← diagnostic & visualization utilities
+│   ├── sync_check.py                  ← verify event↔RGB sync with bbox overlay
+│   ├── raw_label_check.py             ← verify events.raw sync with Event_YOLO labels
+│   ├── raw_to_movie.py                ← compare events.raw vs Event/Frames/ video
+│   ├── verify_frames.py               ← pixel-level alignment check (MAE)
+│   ├── debug_filter_preview.py        ← visualize noise filter effects
+│   ├── find_offset.py                 ← find time offset between event/RGB streams
+│   ├── inspect_raw.py                 ← inspect EVT3 raw file contents
+│   ├── make_filter_movie.py           ← render filter comparison video
+│   └── view_raw_events.py             ← live viewer for raw event stream
 ├── Fred/                              ← Pipelines 1 & 2 (paper baseline)
-│   ├── build_dataset.py               ← read frames+labels from zip → YOLO layout on disk
+│   ├── build_index.py                 ← read frames+labels from zip → YOLO layout on disk
 │   ├── train.py                       ← standard YOLO11n, no channel patch
 │   └── evaluate.py                    ← compare vs paper mAP50
 └── 4channel_project/                  ← Pipeline 3 (our approach)
-    ├── config.py                      ← all settings; calls init_sequence() on import
-    ├── zip_utils.py                   ← transparent zip/folder access (seq_glob, seq_imread…)
     ├── evt3_reader.py                 ← EVT3 binary parser (zip-aware via BytesIO)
     ├── filters.py                     ← refractory + BAF noise filters
     ├── channels.py                    ← 4-channel generator
-    ├── dataset_builder.py             ← build YOLO dataset from events.raw (multi-seq)
-    ├── make_catalog.py                ← scan all zips → write data_from_fred/catalog.yaml
+    ├── build_dataset.py             ← build YOLO dataset from events.raw (multi-seq)
     ├── gdrive.py                      ← Google Drive folder scan + lazy zip download
     ├── train_4ch_yolo.py              ← train with 4-channel input
     ├── evaluate.py                    ← compare vs paper baseline
@@ -81,43 +100,25 @@ ai_drone/                              ← git root (this folder)
     ├── requirements.txt               ← pip dependencies
     ├── environment.yml                ← conda environment
     ├── yolo11n.pt                     ← YOLO base weights
-    ├── docs/                          ← documentation & research notes
-    │   ├── CODE_GUIDE.md              ← developer guide for 4-channel pipeline
-    │   ├── EVT3_READER_FIXES.md       ← EVT3 parser bug history
-    │   ├── drone_detection_research_summary.md ← full research notes
-    │   ├── FRED_EventCamera_Discussion.md ← research discussion notes
-    │   ├── flow_chart.md              ← pipeline flow diagram
-    │   ├── TODO.md                    ← team task list
-    │   └── channel_preview.png        ← sample 4-channel output image
-    ├── notebooks/                     ← Jupyter notebooks
-    │   ├── colab_run.ipynb            ← Google Colab notebook (T4 GPU)
-    │   └── drone_detection_notebook.ipynb ← exploration notebook
-    └── tools/                         ← diagnostic & visualization utilities
-        ├── sync_check.py              ← verify event↔RGB sync with bbox overlay
-        ├── raw_label_check.py         ← verify events.raw sync with Event_YOLO labels
-        ├── raw_to_movie.py            ← compare events.raw vs Event/Frames/ video
-        ├── verify_frames.py           ← pixel-level alignment check (MAE)
-        ├── debug_filter_preview.py    ← visualize noise filter effects
-        ├── find_offset.py             ← find time offset between event/RGB streams
-        ├── inspect_raw.py             ← inspect EVT3 raw file contents
-        ├── make_filter_movie.py       ← render filter comparison video
-        └── view_raw_events.py         ← live viewer for raw event stream
+    └── notebooks/                     ← Jupyter notebooks
+        ├── colab_run.ipynb            ← Google Colab notebook (T4 GPU)
+        └── drone_detection_notebook.ipynb ← exploration notebook
 ```
 
 ## Zip file access — no extraction needed
 
 All scripts read FRED data directly from `.zip` files (`7.zip`, `4.zip`, etc.) via
-`zip_utils.py`. If a folder (e.g. `data_from_fred/7/`) exists on disk it is used instead,
+`common/zip_utils.py`. If a folder (e.g. `data_from_fred/7/`) exists on disk it is used instead,
 otherwise the matching `.zip` is opened transparently.
 
-`zip_utils.py` provides drop-in replacements:
+`common/zip_utils.py` provides drop-in replacements:
 - `seq_glob(dir, pattern)` — like `glob.glob`
 - `seq_imread(path, flags)` — like `cv2.imread`
 - `seq_open_lines(path)` — like `open(path).readlines()`
 - `seq_exists(path)` — like `os.path.exists` (handles virtual directories in zips)
 - `init_sequence(seq_dir)` — call once; auto-detects zip vs folder
 
-`config.py` calls `init_sequence(SEQUENCE_DIR)` on import, so all tools that import
+`common/config.py` calls `init_sequence(SEQUENCE_DIR)` on import, so all tools that import
 `config` automatically get zip access for sequence 7.
 
 ## Multi-sequence dataset (Pipeline 3)
@@ -132,7 +133,7 @@ Each zip is used as a whole unit for one split — no per-frame random splitting
 
 **Auto-assign splits by percentage** (writes splits.yaml automatically):
 ```powershell
-python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
 ```
 Sequences are sorted numerically and distributed by the given percentages (reproducible, no randomness).
 
@@ -164,6 +165,18 @@ Or permanently: `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_de
 - Checkpoint system: auto-resumes from `runs/fred_4channel/weights/last.pt`
 - imread fix: patches `ultralytics.utils.patches.imread` + `ultralytics.data.base.imread`
 
+## build_index.py vs build_dataset.py — what's the difference?
+
+| | `Fred/build_index.py` | `4channel_project/build_dataset.py` |
+|---|---|---|
+| **Input** | Pre-rendered PNGs/JPGs already inside the zip | Raw `events.raw` binary (must be parsed) |
+| **Processing** | Writes label `.txt` files; images stay in zip | EVT3 decode → noise filter → 4-channel generation → save PNGs |
+| **Output images** | 0 — images served from zip at train time | ~3,100 × N sequences new PNGs written to disk |
+| **Channels** | 3 (standard RGB or event frame) | 4 (pos / neg / rotor / time surface) |
+| **Label source** | `Event_YOLO/` or `RGB_YOLO/` (pre-annotated per frame) | `coordinates.txt` matched to 33ms time windows |
+| **Speed** | Fast (no computation, just file I/O) | Slow (signal processing per window) |
+| **Mental model** | "Make an index" | "Compute and save new data" |
+
 ## Here's the complete run order for all 3
 
 ### Pipeline 0 — HuggingFace simplified (download → train → detect)
@@ -182,11 +195,11 @@ Images are served **directly from zip at training time** — no PNG copying to d
 Only small label .txt files are written to disk.
 ```powershell
 # Step 1 — assign sequences to splits (shared with all pipelines):
-python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
 
 # Step 2 — build index (writes labels to disk, images stay in zip):
 cd Fred
-python build_dataset.py
+python build_index.py
 # → reads splits.yaml
 # → writes Fred/fred_yolo/labels/{train,val,test}/*.txt  (label files, tiny)
 # → writes Fred/fred_yolo/train.txt / val.txt / test.txt  (image path index)
@@ -202,7 +215,7 @@ Same as Pipeline 1 but uses RGB camera frames (PADDED_RGB/ JPGs inside the zips)
 ```powershell
 # Uses same splits.yaml — run make_catalog.py --auto-split if not done yet
 cd Fred
-python build_dataset.py --mode rgb
+python build_index.py --mode rgb
 # → writes Fred/fred_rgb_yolo/labels/ + index txt files only (no JPG copying)
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
@@ -216,12 +229,12 @@ python evaluate.py --mode rgb
 cd c:\ai_drone
 
 # Step 1 — assign splits AND index in one command:
-python 4channel_project/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
 # → writes splits.yaml first, then scans all zips → writes catalog.yaml
 # (or edit splits.yaml manually, then run make_catalog.py with no flags)
 
 # Step 2 — generate 4-channel images (must write to disk — see note below):
-python 4channel_project/dataset_builder.py
+python 4channel_project/build_dataset.py
 # → reads splits.yaml; for each sequence in train/val/test order:
 #     opens zip in-memory, parses events.raw sequentially (33ms windows, t=9.8s onward)
 #     computes 4 channels (pos/neg/rotor/time surface) per window
@@ -245,14 +258,14 @@ python 4channel_project/evaluate.py
 cd c:\ai_drone
 
 # Option B1 — download everything at once (simplest):
-python 4channel_project/make_catalog.py --download-all
+python common/make_catalog.py --download-all
 # → downloads all zips → data_from_fred/, then runs catalog scan
 # Then continue from Scenario A Step 2.
 
 # Option B2 — selective (download only what splits.yaml needs):
-python 4channel_project/make_catalog.py --scan-drive   # get Drive file IDs → catalog.yaml
+python common/make_catalog.py --scan-drive   # get Drive file IDs → catalog.yaml
 # Edit data_from_fred/splits.yaml to pick which sequences you want
-python 4channel_project/dataset_builder.py --download  # downloads missing zips, then builds
+python 4channel_project/build_dataset.py --download  # downloads missing zips, then builds
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python 4channel_project/train_4ch_yolo.py
 python 4channel_project/evaluate.py
@@ -260,12 +273,12 @@ python 4channel_project/evaluate.py
 
 Verify dataset split counts without regenerating:
 ```powershell
-python 4channel_project/dataset_builder.py --check
+python 4channel_project/build_dataset.py --check
 ```
 
 Single-sequence legacy mode (seq 7 only):
 ```powershell
-python 4channel_project/dataset_builder.py --single
+python 4channel_project/build_dataset.py --single
 ```
 
 ### Sequence catalog
@@ -276,7 +289,7 @@ python 4channel_project/dataset_builder.py --single
 ```
 make_catalog.py --auto-split → writes splits.yaml + catalog.yaml  (one command, both files)
 make_catalog.py              → refreshes catalog.yaml only         (splits.yaml unchanged)
-dataset_builder.py           → reads both, generates images
+build_dataset.py           → reads both, generates images
 ```
 
 Re-running `make_catalog.py` merges new data but preserves manually written
@@ -291,15 +304,15 @@ Three download modes — all require `pip install gdown`:
 
 ```powershell
 # Option A — download ALL zips at once (simplest, no API key needed):
-python 4channel_project/make_catalog.py --download-all
+python common/make_catalog.py --download-all
 
 # Option B — selective: scan first, then download only what splits.yaml needs:
-python 4channel_project/make_catalog.py --scan-drive      # saves file IDs → catalog.yaml
-python 4channel_project/dataset_builder.py --download     # downloads only missing zips
+python common/make_catalog.py --scan-drive      # saves file IDs → catalog.yaml
+python 4channel_project/build_dataset.py --download     # downloads only missing zips
 
 # Option C — scan with a free Google API key (most reliable listing):
-python 4channel_project/make_catalog.py --scan-drive --api-key AIza...
-python 4channel_project/dataset_builder.py --download
+python common/make_catalog.py --scan-drive --api-key AIza...
+python 4channel_project/build_dataset.py --download
 ```
 `--scan-drive` uses gdown's built-in folder parser (no API key needed by default).
 `--api-key`: free key from console.cloud.google.com → Enable Drive API → Credentials.
@@ -307,7 +320,7 @@ Zips already present locally are never re-downloaded.
 
 ### Data sync check (Event ↔ RGB bounding boxes)
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/sync_check.py                  # full sequence, auto-play at 5 fps
 python tools/sync_check.py --start 9.8     # jump to drone segment
 python tools/sync_check.py --save sync.mp4 # save side-by-side video
@@ -319,7 +332,7 @@ Controls: SPACE=next  A=prev  D=+10  Q=quit
 
 ### Raw event data vs Event_YOLO label sync check
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/raw_label_check.py                  # full sequence 7
 python tools/raw_label_check.py --start 9.8     # jump to drone segment
 python tools/raw_label_check.py --seq 4         # sequence 4 (reads from 4.zip)
@@ -338,7 +351,7 @@ Controls: SPACE=pause  A/←=prev  D/→=+10  Q=quit
 
 ### Event reconstruction vs Frames/ comparison
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/raw_to_movie.py                        # side-by-side: Frames/ PNG vs raw reconstruction
 python tools/raw_to_movie.py --start 9.8 --end 20  # drone segment only
 python tools/raw_to_movie.py --seq 4               # sequence 4
@@ -348,7 +361,7 @@ Controls: SPACE=pause  Q/ESC=quit
 
 ### Pixel-level alignment check
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/verify_frames.py             # 20 frames from drone segment; prints MAE per frame
 python tools/verify_frames.py --n 50      # check 50 frames
 python tools/verify_frames.py --start 0   # include countdown region
@@ -357,30 +370,30 @@ MAE < 5 = aligned, ~20–40 = off by 1 frame, ~60–80 = badly misaligned.
 
 ### Filter before/after preview
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/debug_filter_preview.py      # saves side-by-side PNG to current dir
 ```
 Reads one 33ms window, generates 4-channel images before/after refractory filter.
 
 ### Find event/RGB time offset
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/find_offset.py              # prints first EVT3 timestamp vs first Frames/ filename
 ```
 Difference between printed values is the ts_shift_us offset.
 
 ### Inspect EVT3 data quality
 ```powershell
-cd 4channel_project
-python tools/inspect_raw.py                                              # uses config.py RAW_FILE
-python tools/inspect_raw.py --raw ../data_from_fred/7/Event/events.raw  # explicit path
-python tools/inspect_raw.py --raw ../data_from_fred/7/Event/events.raw --ann ../data_from_fred/7/coordinates.txt
+cd c:\ai_drone
+python tools/inspect_raw.py                                            # uses config.py RAW_FILE
+python tools/inspect_raw.py --raw data_from_fred/7/Event/events.raw   # explicit path
+python tools/inspect_raw.py --raw data_from_fred/7/Event/events.raw --ann data_from_fred/7/coordinates.txt
 ```
 Auto-detects hot pixels, dead zones, rate spikes, polarity bias. Prints "clean data starts at t=X.Xs".
 
 ### Filter comparison movie (live viewer)
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/make_filter_movie.py                       # drone segment 9.87s–35s
 python tools/make_filter_movie.py --start 0 --end 10   # first 10 seconds
 python tools/make_filter_movie.py --delay 50            # ms per frame (default 33)
@@ -390,7 +403,7 @@ Controls: SPACE=pause/resume  →=step  Q/ESC=quit
 
 ### Live raw event viewer
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/view_raw_events.py                       # sequence 7 (default)
 python tools/view_raw_events.py --seq 4               # sequence 4
 python tools/view_raw_events.py --seq 4 --delay 100   # slow down
@@ -400,12 +413,15 @@ Controls: SPACE=pause  →/D=step forward  ←/A=step back  Q/ESC=quit
 
 ### Adding new tools to tools/
 
-All scripts in `tools/` must add this at the top (after the docstring, before local imports) so they can import core modules from the project root:
+All scripts in `tools/` must add this at the top (after the docstring, before local imports)
+so they can import from both `common/` and `4channel_project/`:
 ```python
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 ```
-Run them from `4channel_project/` as `python tools/<script>.py`.
+Run them from `c:\ai_drone` as `python tools/<script>.py`.
 
 ### PID oscillation analysis
 ```powershell
@@ -422,4 +438,4 @@ Detects PID wobble frequency in ground-truth bboxes. Confirmed result: 9.14 Hz p
 
 ## Full research notes
 
-See: `4channel_project/docs/drone_detection_research_summary.md`
+See: `docs/drone_detection_research_summary.md`

@@ -1,5 +1,5 @@
-"""
-raw_label_check.py — Verify events.raw is in sync with Event_YOLO/ labels.
+﻿"""
+raw_label_check.py â€” Verify events.raw is in sync with Event_YOLO/ labels.
 
 Renders frames directly from events.raw (bypassing Event/Frames/ PNGs) and
 overlays the bounding box from the matching Event_YOLO label file.
@@ -16,7 +16,7 @@ Banner colours:
 Console prints one row per frame:
   #  t(s)  events  cx  cy  w  h  status
 
-Controls:  SPACE=pause/resume  A/←=prev  D/→=+10  Q/ESC=quit
+Controls:  SPACE=pause/resume  A/â†=prev  D/â†’=+10  Q/ESC=quit
 
 Usage:
     cd 4channel_project
@@ -31,7 +31,9 @@ import os
 import argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
 from evt3_reader import EVT3Reader
 from config import WINDOW_US, IMG_W, IMG_H, SEQUENCE_DIR, EVENT_YOLO_DIR
@@ -43,7 +45,7 @@ except ImportError:
     print("ERROR: pip install opencv-python")
     sys.exit(1)
 
-# ── Args ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seq',   type=str,   default='7',
@@ -73,9 +75,9 @@ for path, label in [(RAW_FILE, 'events.raw'), (EV_YOLO_DIR, 'Event_YOLO/')]:
         print(f"ERROR: {label} not found:\n  {path}")
         sys.exit(1)
 
-# ── Index Event_YOLO labels by timestamp ──────────────────────────────────────
-# Filename: Video_7_frame_{ts_us}.txt  →  ts_us (µs) = window-END in shifted clock
-# (same convention as Event/Frames/ PNGs — shifted clock = raw_t - ts_shift_us)
+# â”€â”€ Index Event_YOLO labels by timestamp â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Filename: Video_7_frame_{ts_us}.txt  â†’  ts_us (Âµs) = window-END in shifted clock
+# (same convention as Event/Frames/ PNGs â€” shifted clock = raw_t - ts_shift_us)
 
 def _parse_ts(path):
     return int(os.path.basename(path).split('_frame_')[1].split('.')[0])
@@ -90,7 +92,7 @@ def load_boxes(path):
                 boxes.append(tuple(float(x) for x in v[1:]))
     return boxes
 
-yolo_index = {}   # ts_us (int) → file path
+yolo_index = {}   # ts_us (int) â†’ file path
 for f in seq_glob(EV_YOLO_DIR, '*.txt'):
     try:
         yolo_index[_parse_ts(f)] = f
@@ -103,9 +105,9 @@ HALF_WIN = WINDOW_US // 2   # tolerance: half a frame (~16.7ms)
 print(f"\nSequence {args.seq}")
 print(f"  Event_YOLO files  : {len(yolo_ts)}")
 if len(yolo_ts):
-    print(f"  Label range       : {yolo_ts[0]/1e6:.3f}s – {yolo_ts[-1]/1e6:.3f}s (shifted clock)")
+    print(f"  Label range       : {yolo_ts[0]/1e6:.3f}s â€“ {yolo_ts[-1]/1e6:.3f}s (shifted clock)")
 
-# ── Draw helper ───────────────────────────────────────────────────────────────
+# â”€â”€ Draw helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 BOX_COLOR = (0, 255, 255)   # cyan
 
@@ -117,7 +119,7 @@ def draw_boxes(img, boxes):
         cv2.rectangle(img, (x1, y1), (x2, y2), BOX_COLOR, 2)
         cv2.circle(img, (int(cx * W), int(cy * H)), 5, BOX_COLOR, -1)
 
-# ── Build all frames from events.raw ─────────────────────────────────────────
+# â”€â”€ Build all frames from events.raw â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 print(f"\nLoading frames from events.raw ... (Ctrl+C to stop early)\n")
 
@@ -125,7 +127,7 @@ reader  = EVT3Reader(RAW_FILE)
 SKIP_US = reader.ts_shift_us   # Fix 2: clock offset between raw and Event_YOLO/Frames/
                                 # Event_YOLO timestamps = raw_t - SKIP_US (shifted clock)
 if SKIP_US:
-    print(f"  ts_shift_us : {SKIP_US:,} µs ({SKIP_US/1e6:.3f}s) — applied for Event_YOLO lookup")
+    print(f"  ts_shift_us : {SKIP_US:,} Âµs ({SKIP_US/1e6:.3f}s) â€” applied for Event_YOLO lookup")
 
 frames = []   # (display_t_us, img_bgr, status, banner_color, boxes, n_events)
 
@@ -142,7 +144,7 @@ try:
     for t_start, events in reader.iter_windows(WINDOW_US,
                                                t_start=t_start_arg,
                                                t_end=t_end_arg):
-        # ── Render event frame (white=positive, blue=negative) ────────────────
+        # â”€â”€ Render event frame (white=positive, blue=negative) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         img_bgr = np.zeros((IMG_H, IMG_W, 3), dtype=np.uint8)
         if len(events) > 0:
             pos = events[events['p'] == 1]
@@ -158,13 +160,13 @@ try:
             img_bgr[:, :, 0] = np.clip(
                 pos_map / pmax * 128 + neg_map / nmax * 255, 0, 255).astype(np.uint8)
 
-        # ── Convert raw time → shifted (Event_YOLO) time ──────────────────────
+        # â”€â”€ Convert raw time â†’ shifted (Event_YOLO) time â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         # Event_YOLO filenames encode the window-END in the shifted clock.
-        # raw window starts at t_start → shifted window end = t_start - SKIP_US + WINDOW_US
-        display_t  = t_start - SKIP_US                  # user-visible time (seconds 0…N)
+        # raw window starts at t_start â†’ shifted window end = t_start - SKIP_US + WINDOW_US
+        display_t  = t_start - SKIP_US                  # user-visible time (seconds 0â€¦N)
         ev_yolo_t  = display_t + WINDOW_US              # window-end in shifted clock
 
-        # ── Match to nearest Event_YOLO label ─────────────────────────────────
+        # â”€â”€ Match to nearest Event_YOLO label â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         boxes        = []
         status       = "NO LABEL"
         banner_color = (60, 60, 60)   # dark grey
@@ -181,7 +183,7 @@ try:
             if delta_us <= HALF_WIN:
                 boxes = load_boxes(yolo_index[nearest_ts])
                 sign  = '+' if (nearest_ts - ev_yolo_t) >= 0 else ''
-                d_str = f"Δ={sign}{nearest_ts - ev_yolo_t}µs"
+                d_str = f"Î”={sign}{nearest_ts - ev_yolo_t}Âµs"
                 if boxes:
                     status       = f"MATCH  {d_str}"
                     banner_color = (0, 200, 60)     # green
@@ -192,7 +194,7 @@ try:
                 status       = f"NO LABEL  (nearest {delta_us/1e3:.1f}ms away)"
                 banner_color = (40, 40, 180)        # red
 
-        # ── Overlay bbox ──────────────────────────────────────────────────────
+        # â”€â”€ Overlay bbox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         draw_boxes(img_bgr, boxes)
 
         frames.append((display_t, img_bgr, status, banner_color, boxes, len(events)))
@@ -201,22 +203,22 @@ try:
             print(f"  {len(frames)} frames  t={display_t/1e6:.2f}s  [{status}]")
 
 except KeyboardInterrupt:
-    print(f"\nStopped early — {len(frames)} frames loaded")
+    print(f"\nStopped early â€” {len(frames)} frames loaded")
 
 if not frames:
     print("No frames generated. Check RAW_FILE path and --start/--end range.")
     sys.exit(1)
 
 print(f"\n{len(frames)} frames ready.  Opening viewer...")
-print("Controls: SPACE=pause/resume  A/←=prev  D/→=+10  Q=quit")
+print("Controls: SPACE=pause/resume  A/â†=prev  D/â†’=+10  Q=quit")
 print("  CYAN box = Event_YOLO label  |  GREEN=matched  ORANGE=empty  RED=no label\n")
 
-# ── Console table header ──────────────────────────────────────────────────────
+# â”€â”€ Console table header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 print(f"{'#':>5}  {'t(s)':>8}  {'events':>7}  {'cx':>6} {'cy':>6} {'w':>6} {'h':>6}  status")
-print("─" * 82)
+print("â”€" * 82)
 
-# ── Optional video writer ─────────────────────────────────────────────────────
+# â”€â”€ Optional video writer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 BANNER_H = 52
 SCALE    = 0.65
@@ -229,9 +231,9 @@ if args.save:
     writer = cv2.VideoWriter(args.save, fourcc, max(1, 1000 // args.delay), (OUT_W, OUT_H))
     print(f"Saving to: {os.path.abspath(args.save)}")
 
-# ── Viewer ────────────────────────────────────────────────────────────────────
+# â”€â”€ Viewer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-WIN    = f"raw_label_check — seq {args.seq}  |  SPACE=pause  A/D=prev/+10  Q=quit"
+WIN    = f"raw_label_check â€” seq {args.seq}  |  SPACE=pause  A/D=prev/+10  Q=quit"
 paused = False
 i      = 0
 
@@ -268,7 +270,7 @@ while 0 <= i < len(frames):
               f"{cx:>6.3f} {cy:>6.3f} {bw:>6.3f} {bh:>6.3f}  {status}")
     else:
         print(f"{i:>5}  {t_us/1e6:>8.3f}  {n_ev:>7,}  "
-              f"{'—':>6} {'—':>6} {'—':>6} {'—':>6}  {status}")
+              f"{'â€”':>6} {'â€”':>6} {'â€”':>6} {'â€”':>6}  {status}")
 
     key = cv2.waitKey(1 if paused else args.delay) & 0xFF
 
@@ -277,14 +279,14 @@ while 0 <= i < len(frames):
     elif key == ord(' '):
         paused = not paused
         print("  [PAUSED]" if paused else "  [PLAYING]")
-    elif key in (ord('a'), 81):           # A or ← arrow
+    elif key in (ord('a'), 81):           # A or â† arrow
         i = max(0, i - 1)
-    elif key in (ord('d'), 83):           # D or → arrow → +10
+    elif key in (ord('d'), 83):           # D or â†’ arrow â†’ +10
         i = min(len(frames) - 1, i + 10)
     elif not paused:
         i += 1
 
-print("─" * 82)
+print("â”€" * 82)
 print(f"\nDone.  {min(i + 1, len(frames))} frames shown.")
 
 if writer:

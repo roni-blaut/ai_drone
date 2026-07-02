@@ -1,4 +1,4 @@
-# 4-Channel Project — Code Guide
+﻿# 4-Channel Project — Code Guide
 
 Complete explanation of every file, every function, and how data flows through the pipeline.
 
@@ -24,10 +24,24 @@ Pipeline 1/2 patch `ultralytics imread` with `multi_seq_imread` (zip_utils.py) s
 YOLO loads images transparently from zip. Pipeline 3 cannot do this because the
 4-channel images don't exist in the zip and must be pre-computed.
 
+### build_index.py vs build_dataset.py — what's the difference?
+
+These two files have similar names but do fundamentally different things:
+
+| | `Fred/build_index.py` | `4channel_project/build_dataset.py` |
+|---|---|---|
+| **Input** | Pre-rendered PNGs/JPGs already inside the zip | Raw `events.raw` binary (must be parsed) |
+| **Processing** | Writes label `.txt` files; images stay in zip | EVT3 decode → noise filter → 4-channel generation → save PNGs |
+| **Output images** | 0 — images served from zip at train time | ~3,100 × N sequences new PNGs written to disk |
+| **Channels** | 3 (standard RGB or event frame) | 4 (pos / neg / rotor / time surface) |
+| **Label source** | `Event_YOLO/` or `RGB_YOLO/` (pre-annotated per frame) | `coordinates.txt` matched to 33ms time windows |
+| **Speed** | Fast (no computation, just file I/O) | Slow (signal processing per window) |
+| **Mental model** | "Make an index" | "Compute and save new data" |
+
 ### Pipeline 3 full flow (Scenario A — zips already local)
 ```
 make_catalog.py --auto-split → splits.yaml + catalog.yaml  (one command does both)
-dataset_builder.py           → dataset/images/*.png         (4-ch PNGs, generated once)
+build_dataset.py           → dataset/images/*.png         (4-ch PNGs, generated once)
                              → dataset/labels/*.txt         (YOLO labels)
                              → dataset/train.txt / val.txt / test.txt
 train_4ch_yolo.py            → reads PNGs from disk → best.pt
@@ -46,17 +60,17 @@ make_catalog.py --download-all               → downloads all zips, then Scenar
   OR
 make_catalog.py --scan-drive                 → adds drive_file_id to catalog.yaml
   edit splits.yaml to pick sequences
-dataset_builder.py --download                → downloads missing zips + builds dataset/
+build_dataset.py --download                → downloads missing zips + builds dataset/
 train_4ch_yolo.py + evaluate.py
 ```
 
 **Key file roles:**
 - `catalog.yaml` — metadata index (frame counts, Drive IDs). Read by `--download`, not training.
-- `splits.yaml` — which sequences → train / val / test. Read by `dataset_builder.py` and `Fred/build_dataset.py`.
+- `splits.yaml` — which sequences → train / val / test. Read by `build_dataset.py` and `Fred/build_index.py`.
 - `dataset/` — pre-generated 4-channel PNGs. Read by YOLO during Pipeline 3 training.
 - `Fred/fred_yolo/` — label files + index txts only (no images). Pipeline 1 reads images from zip.
 
-### What dataset_builder.py does per sequence
+### What build_dataset.py does per sequence
 
 Given `splits.yaml` with `train: [0, 1, 4, 7, 10, 31]`, it loops in that order:
 
@@ -104,7 +118,7 @@ data_from_fred/splits.yaml    data_from_fred/N.zip (or folder N/)
         │                      zip_utils.py  ← transparent zip/folder access
         │                              │
         ▼                              ▼
-dataset_builder.py            evt3_reader.py  ← parse EVT3 binary (zip-aware)
+build_dataset.py            evt3_reader.py  ← parse EVT3 binary (zip-aware)
 (multi-sequence loop)                 │
         │                      filters.py     ← noise removal
         │                             │
@@ -123,12 +137,14 @@ train_4ch_yolo.py      ← patch YOLO first layer → train → best.pt
 evaluate.py            ← mAP50 vs paper baseline + ablation study
 ```
 
-All paths live in `config.py`. `zip_utils.init_sequence()` is called there on
+All paths live in `common/config.py`. `zip_utils.init_sequence()` is called there on
 import — all downstream scripts get transparent zip access automatically.
 
 ---
 
-## config.py
+## common/config.py
+
+**Location:** `common/config.py` — imported by all three pipelines (Fred/, 4channel_project/, tools/).
 
 **Purpose:** Single place for all settings. Auto-detects which environment you are running on.
 
@@ -168,7 +184,9 @@ Sets paths and training parameters accordingly:
 
 ---
 
-## zip_utils.py
+## common/zip_utils.py
+
+**Location:** `common/zip_utils.py` — imported by all three pipelines (Fred/, 4channel_project/, tools/).
 
 **Purpose:** Transparent access to FRED sequence data from `.zip` files or extracted folders.
 All scripts use the `seq_*` helpers instead of raw `glob`/`open`/`cv2.imread` calls.
@@ -257,7 +275,7 @@ Each event is reconstructed by combining the most recent ADDR_Y, ADDR_X, and tim
 
 **`iter_windows(window_us, t_start, t_end)`**
 - Generator that yields `(t_start, events)` for each consecutive time window
-- Used by `dataset_builder.py` to process the whole file efficiently
+- Used by `build_dataset.py` to process the whole file efficiently
 - Maintains a buffer across chunks so no events are missed at boundaries
 
 **`_get_file()`**
@@ -345,7 +363,7 @@ Convenience wrapper — applies refractory then BAF in correct order.
 ### Function: `fast_filter(events, tau_us)`
 
 Refractory only — no BAF. Faster, good enough for training data generation.
-Use this in `dataset_builder.py` where speed matters more than filter quality.
+Use this in `build_dataset.py` where speed matters more than filter quality.
 
 ---
 
@@ -453,7 +471,7 @@ Returns BGR image for OpenCV display/save.
 
 ---
 
-## dataset_builder.py
+## build_dataset.py
 
 **Purpose:** Read `events.raw` from one or more sequences, generate 4 channels per 33ms window, match annotations, save as YOLO training data.
 
@@ -482,7 +500,7 @@ Prints a summary of a built dataset without regenerating any images:
 - Line counts for `train.txt`, `val.txt`, `test.txt` + which sequences each contains
 - Filename collision check (all names must be unique)
 
-Run with `python dataset_builder.py --check`.
+Run with `python build_dataset.py --check`.
 
 ### Function: `build_multi_sequence(splits_yaml, output_dir, window_us, download=False)`
 
@@ -510,7 +528,7 @@ otherwise `coordinates.txt`. Uses `seq_exists()`.
 ### Function: `build_dataset(...)` *(legacy, single-sequence)*
 
 Random 80/20 per-frame split within sequence 7. Saves to `images/train/`, `images/val/`.
-Run with `python dataset_builder.py --single` to use this mode.
+Run with `python build_dataset.py --single` to use this mode.
 
 ### Function: `load_annotations(coords_file)`
 
@@ -586,7 +604,8 @@ Merges with any existing `catalog.yaml` so manually written `description` and
 `splits.yaml`.
 
 ```powershell
-python 4channel_project/make_catalog.py
+# Run from c:\ai_drone
+python common/make_catalog.py
 ```
 
 ### Constant
@@ -813,9 +832,10 @@ No manual path changes needed — `config.py` auto-detects Colab.
 
 ## tools/
 
-Diagnostic and visualization utilities. All scripts must be run from `4channel_project/`
-as `python tools/<script>.py`. Each script adds the parent directory to `sys.path` so
-it can import the core modules (`config`, `evt3_reader`, `zip_utils`, etc.).
+Diagnostic and visualization utilities in `tools/` at the repo root.
+Run all scripts from `c:\ai_drone` as `python tools/<script>.py`.
+Each script adds both `common/` and `4channel_project/` to `sys.path` so it can
+import shared modules (`config`, `zip_utils`) and pipeline modules (`evt3_reader`, `channels`, etc.).
 
 | Script | Purpose |
 |---|---|
@@ -842,7 +862,7 @@ Banner colours:
 - **GREY** — window outside annotated range
 
 ```powershell
-cd 4channel_project
+cd c:\ai_drone
 python tools/raw_label_check.py                  # sequence 7, full run
 python tools/raw_label_check.py --start 9.8     # jump to drone segment
 python tools/raw_label_check.py --seq 4         # sequence 4 (from 4.zip)
@@ -855,7 +875,9 @@ Controls: `SPACE`=pause/resume  `A/←`=prev  `D/→`=+10  `Q/ESC`=quit
 Every script in `tools/` must include this at the top (after the docstring):
 ```python
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 ```
 
 ---
@@ -875,7 +897,7 @@ shape = (4, 720, 1280)   # 4 channels, height, width
 values = [0.0, 1.0]      # normalized
 ```
 
-### Saved image format (output of dataset_builder.py)
+### Saved image format (output of build_dataset.py)
 ```python
 # Saved as RGBA PNG — PIL mode='RGBA', uint8 per channel
 shape = (720, 1280, 4)   # H, W, C — PIL/numpy convention
@@ -910,10 +932,10 @@ runs/fred_4channel/
 | Issue | Symptom | Fix |
 |---|---|---|
 | OpenMP DLL conflict | `OMP: Error #15` on Windows | `$env:KMP_DUPLICATE_LIB_OK="TRUE"` |
-| Old .npy dataset | `No images found` error | Delete `dataset/` folder and rerun `dataset_builder.py` |
+| Old .npy dataset | `No images found` error | Delete `dataset/` folder and rerun `build_dataset.py` |
 | Wrong channel count | Layer 0 shows `[3, 16, 3, 2]` | Ensure `channels: 4` in `dataset.yaml` and no old checkpoint loaded |
 | fbgemm.dll error | PyTorch DLL load failure | Install Visual C++ Redistributable from aka.ms/vs/17/release/vc_redist.x64.exe |
-| Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python dataset_builder.py` |
+| Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python build_dataset.py` |
 | Sequence not found | `FileNotFoundError: Zip file not found` | Add `N.zip` to `data_from_fred/` or update `splits.yaml` |
 | Drive scan finds no files | `HTML parsing found no .zip files` | `--scan-drive` now uses gdown by default (no API key needed); if still failing, add `--api-key AIza...` |
 | Drive download arg error | `unexpected keyword argument 'remaining_ok'` | Update gdrive.py — fixed in commit a995d75 |
@@ -922,4 +944,4 @@ runs/fred_4channel/
 
 ---
 
-*Code Guide — 4-Channel Drone Detection Project — Updated June 2026*
+*Code Guide — 4-Channel Drone Detection Project — Updated July 2026*

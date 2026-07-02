@@ -1,5 +1,5 @@
-"""
-raw_to_movie.py — Compare events.raw reconstruction vs Event/Frames/ PNGs.
+﻿"""
+raw_to_movie.py â€” Compare events.raw reconstruction vs Event/Frames/ PNGs.
 
 Shows a side-by-side OpenCV movie:
   LEFT  = original PNG from Event/Frames/ (or blank if no matching file)
@@ -19,7 +19,9 @@ Usage:
 import sys, os, argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
 from evt3_reader import EVT3Reader
 from config import IMG_W, IMG_H, WINDOW_US
@@ -30,7 +32,7 @@ try:
 except ImportError:
     print("ERROR: pip install opencv-python"); sys.exit(1)
 
-# ── Args ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seq',   type=str,   default='7')
@@ -55,7 +57,7 @@ if not seq_exists(RAW_FILE):
 t_start_us = int(args.start * 1e6) if args.start is not None else None
 t_end_us   = int(args.end   * 1e6) if args.end   is not None else None
 
-# ── Video writer setup ────────────────────────────────────────────────────────
+# â”€â”€ Video writer setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 PANEL_W  = IMG_W // 2          # each panel scaled to half width
 PANEL_H  = IMG_H // 2
@@ -67,19 +69,19 @@ fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 writer = cv2.VideoWriter(args.save, fourcc, args.fps, (FRAME_W, FRAME_H))
 print(f"Saving to: {os.path.abspath(args.save)}")
 
-# ── OpenCV window ─────────────────────────────────────────────────────────────
+# â”€â”€ OpenCV window â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-WIN = f"events.raw vs Frames/  —  seq {args.seq}"
+WIN = f"events.raw vs Frames/  â€”  seq {args.seq}"
 cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
 cv2.resizeWindow(WIN, FRAME_W, FRAME_H)
 
-# ── Helper: accumulate events → uint8 grayscale ───────────────────────────────
+# â”€â”€ Helper: accumulate events â†’ uint8 grayscale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
 def events_to_bgr(evs):
     # Accumulate all events per pixel, normalize by 99th percentile,
-    # then apply CLAHE to boost local contrast — matching Frames/ appearance.
+    # then apply CLAHE to boost local contrast â€” matching Frames/ appearance.
     img = np.zeros((IMG_H, IMG_W), dtype=np.float32)
     if len(evs) > 0:
         np.add.at(img, (evs['y'], evs['x']), 1.0)
@@ -91,14 +93,14 @@ def events_to_bgr(evs):
     gray = _clahe.apply((img * 255).astype(np.uint8))
     return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
+# â”€â”€ Main loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 print(f"\nStreaming events.raw ...")
 print(f"Controls:  SPACE=pause   Q/ESC=quit\n")
 print(f"{'Time':>8}  {'Events':>8}  {'Frames/ match'}")
 print("-" * 40)
 
-# Pre-index Frames/ timestamps — sort NUMERICALLY (not lexicographically)
+# Pre-index Frames/ timestamps â€” sort NUMERICALLY (not lexicographically)
 # Python sorted() compares strings char-by-char: '1' < '3' so "100000" < "33333"
 # We extract the number first, then sort by its integer value.
 _all_pairs   = sorted([(int(os.path.basename(p).split('_frame_')[1][:-4]), p)
@@ -106,7 +108,7 @@ _all_pairs   = sorted([(int(os.path.basename(p).split('_frame_')[1][:-4]), p)
 _frame_ts    = np.array([t for t, _ in _all_pairs], dtype=np.int64)
 _frame_files = [p for _, p in _all_pairs]
 print(f"Frames/ index: {len(_frame_ts)} files  "
-      f"t={_frame_ts[0]/1e6:.3f}s – {_frame_ts[-1]/1e6:.3f}s")
+      f"t={_frame_ts[0]/1e6:.3f}s â€“ {_frame_ts[-1]/1e6:.3f}s")
 
 def nearest_frame(t_us):
     """Return (path, timestamp) of the Frames/ PNG nearest to t_us."""
@@ -119,14 +121,14 @@ reader = EVT3Reader(RAW_FILE)
 
 # Skip the pre-recording portion of raw data (ts_shift_us worth of junk at the start).
 # The Frames/ folder was built starting from raw t=ts_shift_us, so that is our t=0.
-SKIP_US = reader.ts_shift_us   # 1,163,264 µs for seq 7
+SKIP_US = reader.ts_shift_us   # 1,163,264 Âµs for seq 7
 if t_start_us is None:
     t_start_us = SKIP_US        # default: begin where Frames/ begins
 if t_end_us is not None:
-    t_end_us += SKIP_US         # user's --end is in Frames/ time → convert to raw time
+    t_end_us += SKIP_US         # user's --end is in Frames/ time â†’ convert to raw time
 
 print(f"  Skipping first {SKIP_US/1e6:.3f}s of raw data (ts_shift_us)")
-print(f"  Reading raw t={t_start_us/1e6:.3f}s – "
+print(f"  Reading raw t={t_start_us/1e6:.3f}s â€“ "
       f"{'end' if t_end_us is None else f'{t_end_us/1e6:.3f}s'}\n")
 
 paused = False
@@ -136,7 +138,7 @@ for t_start, evs in reader.iter_windows(WINDOW_US,
                                          t_start=t_start_us,
                                          t_end=t_end_us):
     t_sec      = t_start / 1e6
-    frames_t   = t_start - SKIP_US          # convert raw time → Frames/ time
+    frames_t   = t_start - SKIP_US          # convert raw time â†’ Frames/ time
     recon      = events_to_bgr(evs)
 
     # Frames/ filenames are window-END timestamps: file named T holds events [T-33ms, T]
@@ -145,7 +147,7 @@ for t_start, evs in reader.iter_windows(WINDOW_US,
     delta_ms = abs(orig_ts - frames_t) / 1000 if orig_ts else 9999
     if orig_path and delta_ms < 50:   # within 50ms = same frame
         orig_full = seq_imread(orig_path, cv2.IMREAD_GRAYSCALE)
-        match_label = f"MATCH  Δ={delta_ms:.0f}ms"
+        match_label = f"MATCH  Î”={delta_ms:.0f}ms"
         match_color = (0, 220, 80)
     else:
         orig_full   = np.zeros((IMG_H, IMG_W), dtype=np.uint8)
@@ -191,7 +193,7 @@ for t_start, evs in reader.iter_windows(WINDOW_US,
         break
     elif key == ord(' '):
         paused = not paused
-        print("  [PAUSED — press SPACE to resume]" if paused else "  [PLAYING]")
+        print("  [PAUSED â€” press SPACE to resume]" if paused else "  [PLAYING]")
         if paused:
             cv2.waitKey(0)
 

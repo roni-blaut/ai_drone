@@ -19,6 +19,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import glob
 from pathlib import Path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'common'))
 
 from config import (
     DATASET_DIR, RUNS_DIR, RUN_NAME,
@@ -222,7 +223,7 @@ def train_with_ultralytics():
     yaml_path = os.path.join(DATASET_DIR, 'dataset.yaml')
     if not os.path.exists(yaml_path):
         print(f"ERROR: dataset.yaml not found at {yaml_path}")
-        print("Run dataset_builder.py first")
+        print("Run build_dataset.py first")
         return
 
     # ── Check for existing checkpoint ────────────────────────────────────────
@@ -312,7 +313,7 @@ if __name__ == "__main__":
     yaml_path = os.path.join(DATASET_DIR, 'dataset.yaml')
     if not os.path.exists(yaml_path):
         print(f"\nDataset not found at: {DATASET_DIR}")
-        print("Run first:  python dataset_builder.py")
+        print("Run first:  python build_dataset.py")
         sys.exit(1)
 
     # Check device

@@ -1,14 +1,14 @@
-"""
-view_raw_events.py — Live OpenCV viewer of raw event camera data.
+﻿"""
+view_raw_events.py â€” Live OpenCV viewer of raw event camera data.
 
 Shows accumulated event frames (like the Frames/ PNGs) as a real-time movie.
 Highlights GREEN = drone annotated, RED = removed/gap window, YELLOW = pre/post flight.
 
 Controls:
-    SPACE      — pause / resume
-    → / D      — step one frame forward
-    ← / A      — step one frame back
-    Q / ESC    — quit
+    SPACE      â€” pause / resume
+    â†’ / D      â€” step one frame forward
+    â† / A      â€” step one frame back
+    Q / ESC    â€” quit
 
 Usage:
     cd 4channel_project
@@ -22,10 +22,12 @@ import os
 import argparse
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
+sys.path.insert(0, os.path.join(_ROOT, 'common'))
+sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
 from evt3_reader import EVT3Reader
-from dataset_builder import load_annotations, load_removed_windows
+from build_dataset import load_annotations, load_removed_windows
 from config import WINDOW_US, IMG_W, IMG_H
 from zip_utils import init_sequence, seq_exists
 
@@ -35,7 +37,7 @@ except ImportError:
     print("ERROR: pip install opencv-python")
     sys.exit(1)
 
-# ── Args ──────────────────────────────────────────────────────────────────────
+# â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--seq',   type=str, default='7',
@@ -58,7 +60,7 @@ if not seq_exists(RAW):
     print(f"ERROR: {RAW} not found")
     sys.exit(1)
 
-# ── Load annotation info ──────────────────────────────────────────────────────
+# â”€â”€ Load annotation info â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 annotations     = load_annotations(ANN)
 removed_windows = load_removed_windows(annotations)
@@ -67,11 +69,11 @@ ann_start_us    = int(ann_times_us[0])
 ann_end_us      = int(ann_times_us[-1])
 
 print(f"\nSequence {args.seq}")
-print(f"  Annotated region : {ann_start_us/1e6:.2f}s – {ann_end_us/1e6:.2f}s")
+print(f"  Annotated region : {ann_start_us/1e6:.2f}s â€“ {ann_end_us/1e6:.2f}s")
 print(f"  Removed windows  : {len(removed_windows)}")
 print(f"\nLoading frames... (press Ctrl+C to stop loading early)\n")
 
-# ── Frame status classifier ───────────────────────────────────────────────────
+# â”€â”€ Frame status classifier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def classify_window(t_start, t_end):
     """Return (label, color_bgr) for this time window."""
@@ -93,7 +95,7 @@ def classify_window(t_start, t_end):
         return "DRONE ANNOTATED", (0, 200, 50)   # green
     return "no annotation", (120, 120, 120)       # gray
 
-# ── Build frames ──────────────────────────────────────────────────────────────
+# â”€â”€ Build frames â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 reader  = EVT3Reader(RAW)
 frames  = []
@@ -160,12 +162,12 @@ try:
                   f"[{label}]")
 
 except KeyboardInterrupt:
-    print(f"\nStopped early — loaded {len(frames)} frames")
+    print(f"\nStopped early â€” loaded {len(frames)} frames")
 
 print(f"\n{len(frames)} frames loaded. Opening viewer...")
-print("Controls:  SPACE=pause   → =step fwd   ← =step back   Q=quit\n")
+print("Controls:  SPACE=pause   â†’ =step fwd   â† =step back   Q=quit\n")
 
-# ── Legend ────────────────────────────────────────────────────────────────────
+# â”€â”€ Legend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 print("Color legend:")
 print("  GREEN  strip = drone annotated (drone visible)")
@@ -176,9 +178,9 @@ print()
 print("  White pixels = positive polarity events")
 print("  Blue  pixels = negative polarity events")
 
-# ── Playback ──────────────────────────────────────────────────────────────────
+# â”€â”€ Playback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-cv2.namedWindow(f"Raw Events — Sequence {args.seq}", cv2.WINDOW_NORMAL)
+cv2.namedWindow(f"Raw Events â€” Sequence {args.seq}", cv2.WINDOW_NORMAL)
 
 i      = 0
 paused = False
@@ -188,7 +190,7 @@ while True:
         i = 0
 
     t_sec, frame = frames[i]
-    cv2.imshow(f"Raw Events — Sequence {args.seq}", frame)
+    cv2.imshow(f"Raw Events â€” Sequence {args.seq}", frame)
 
     key = cv2.waitKey(1 if paused else args.delay) & 0xFF
 
@@ -197,9 +199,9 @@ while True:
     elif key == ord(' '):
         paused = not paused
         print("Paused" if paused else "Playing")
-    elif key in (83, ord('d')):   # → or D
+    elif key in (83, ord('d')):   # â†’ or D
         i += 1
-    elif key in (81, ord('a')):   # ← or A
+    elif key in (81, ord('a')):   # â† or A
         i = max(0, i - 1)
     elif not paused:
         i += 1

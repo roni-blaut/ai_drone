@@ -34,15 +34,16 @@ PAPER = {'event': 87.68, 'rgb': 76.23}
 
 if not os.path.exists(YAML_PATH):
     raise FileNotFoundError(
-        f"dataset.yaml not found — run build_dataset.py --mode {args.mode} first\n{YAML_PATH}"
+        f"dataset.yaml not found — run build_index.py --mode {args.mode} first\n{YAML_PATH}"
     )
 
 # ── Patch Ultralytics imread to serve images from zip ─────────────────────────
 # Images are stored in zip files under data_from_fred/{seq}/...
-# build_dataset.py wrote paths pointing into the zip (virtual paths on disk).
+# build_index.py wrote paths pointing into the zip (virtual paths on disk).
 # multi_seq_imread transparently reads from the correct zip based on the path.
 
-sys.path.insert(0, os.path.join(HERE, '..', '4channel_project'))
+sys.path.insert(0, os.path.join(HERE, '..', 'common'))
+from config import DEVICE, BATCH, EPOCHS
 from zip_utils import multi_seq_imread
 
 import cv2 as _cv2
@@ -56,15 +57,6 @@ _patches.imread = _patched_imread
 _base.imread    = _patched_imread
 
 # ─────────────────────────────────────────────────────────────────────────────
-
-try:
-    import torch
-    GPU    = torch.cuda.is_available()
-    DEVICE = 0 if GPU else 'cpu'
-    BATCH  = 16 if GPU else 4
-    print(f"Device: {'GPU — ' + torch.cuda.get_device_name(0) if GPU else 'CPU'}")
-except ImportError:
-    DEVICE, BATCH = 'cpu', 4
 
 from ultralytics import YOLO
 
@@ -81,7 +73,7 @@ else:
 
 results = model.train(
     data     = YAML_PATH,
-    epochs   = 100,
+    epochs   = EPOCHS,
     batch    = BATCH,
     imgsz    = 640,
     device   = DEVICE,

@@ -18,6 +18,14 @@ To force a specific environment (overrides auto-detect):
 
 import os
 
+_HERE = os.path.dirname(os.path.abspath(__file__))   # 4channel_project/
+
+# ── Shared paths — used by all pipelines ─────────────────────────────────────
+
+DATA_FROM_FRED = os.path.normpath(os.path.join(_HERE, '..', 'data_from_fred'))
+SPLITS_YAML    = os.path.join(DATA_FROM_FRED, 'splits.yaml')
+CATALOG_YAML   = os.path.join(DATA_FROM_FRED, 'catalog.yaml')
+
 # ── Torch — optional at config load time ─────────────────────────────────────
 
 try:
@@ -78,15 +86,15 @@ elif ENV == 'nvidia':
 
 elif ENV == 'cpu':
     # CPU only — same paths as local but slower settings applied below
-    SEQUENCE_DIR = "../data_from_fred/7"
-    DATASET_DIR  = "./dataset"
-    RUNS_DIR     = "./runs"
+    SEQUENCE_DIR = os.path.join(_HERE, '..', 'data_from_fred', '7')
+    DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
+    RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
 
 else:
     # Local PC — Windows VS Code
-    SEQUENCE_DIR = "../data_from_fred/7"
-    DATASET_DIR  = "./dataset"
-    RUNS_DIR     = "./runs"
+    SEQUENCE_DIR = os.path.join(_HERE, '..', 'data_from_fred', '7')
+    DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
+    RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
 
 # Initialise zip or real-folder access for SEQUENCE_DIR
 import sys as _sys

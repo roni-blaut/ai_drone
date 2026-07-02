@@ -1,4 +1,4 @@
-# Pipeline 3 — 4-Channel Event Camera Drone Detection
+﻿# Pipeline 3 — 4-Channel Event Camera Drone Detection
 
 ## Full Pipeline Flowchart
 
@@ -8,7 +8,7 @@ flowchart TD
 
     %% ── INPUT ──────────────────────────────────────────
     subgraph INPUT["INPUT FILES (read from zip or folder)"]
-        B["N.zip → Event/events.raw\n127MB+ · Prophesee EVT3 binary\nloaded via zip_utils into BytesIO"]
+        B["N.zip → Event/events.raw\n127MB+ · Prophesee EVT3 binary\nloaded via common/zip_utils into BytesIO"]
         C["N.zip → coordinates.txt\nor interpolated_coordinates.txt\nbbox annotations"]
         D["N.zip → Event/events.raw.tmp_index\nts_shift_us (clock offset)"]
         E2["data_from_fred/splits.yaml\ntrain:[4,7,10,31]  val:[52]  test:[]"]
@@ -34,7 +34,7 @@ flowchart TD
 
     %% ── STEP 2: ANNOTATION LOADER ──────────────────────
     C --> N
-    subgraph ANNOT["STEP 2 · dataset_builder.py — Annotations"]
+    subgraph ANNOT["STEP 2 · build_dataset.py — Annotations"]
         N["load_annotations()\nparse time_sec → t_us\nsort by timestamp"]
         N --> O["load_removed_windows()\nfind gaps > 50ms between annotations\n→ list of bad time ranges"]
     end
@@ -199,7 +199,7 @@ Event stream (33ms window)
 | `evt3_reader.py` | Parse EVT3 binary → numpy events |
 | `filters.py` | Refractory + BAF noise removal |
 | `channels.py` | Generate 4-channel stack |
-| `dataset_builder.py` | Orchestrate all above, save PNGs + labels |
+| `build_dataset.py` | Orchestrate all above, save PNGs + labels |
 | `train_4ch_yolo.py` | Patch YOLO first layer, train |
 | `evaluate.py` | Measure mAP50 vs baselines |
-| `config.py` | All paths and hyperparameters |
+| `common/config.py` | All paths and hyperparameters (shared by all pipelines) |

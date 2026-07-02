@@ -1,4 +1,4 @@
-# Drone Detection with Event Cameras — Research Summary
+﻿# Drone Detection with Event Cameras — Research Summary
 
 ## Overview
 
@@ -460,7 +460,7 @@ filters.py              refractory filter → BAF filter → clean events
 channels.py             split into 4 channels → shape (4, 720, 1280)
         │
         ▼
-dataset_builder.py      save 4-ch RGBA PNG + YOLO .txt labels → train/val split
+build_dataset.py      save 4-ch RGBA PNG + YOLO .txt labels → train/val split
         │
         ▼
 train_4ch_yolo.py       patch YOLO first layer → train → best.pt
@@ -499,7 +499,7 @@ Channel 4 separates "just happened" from "happened sometime in this window."
 | `evt3_reader.py` | Parse Prophesee EVT3 raw binary file into event arrays |
 | `filters.py` | Refractory period filter + Background Activity Filter (BAF) |
 | `channels.py` | Generate 4 physics-based channels from filtered events |
-| `dataset_builder.py` | Build full YOLO training dataset from events.raw |
+| `build_dataset.py` | Build full YOLO training dataset from events.raw |
 | `train_4ch_yolo.py` | Patch YOLO first layer to 4 channels and train |
 | `evaluate.py` | Evaluate mAP50 vs paper baseline + ablation study |
 | `colab_run.ipynb` | Google Colab notebook — 10 cells, run top to bottom |
@@ -517,7 +517,7 @@ conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect
 
 Step 1  python evt3_reader.py        verify raw file reads correctly
 Step 2  python channels.py           verify 4 channels + save preview PNG
-Step 3  python dataset_builder.py    build training data — saves RGBA .png files
+Step 3  python build_dataset.py    build training data — saves RGBA .png files
                                      (~20-30 min, creates dataset/ with channels: 4 yaml)
 Step 4  python train_4ch_yolo.py     train YOLO with 4 channels
                                      (auto-resumes from last.pt if interrupted)
@@ -598,7 +598,7 @@ Channel 3 looks back 100ms into raw event history, but the detection bbox label 
 
 ### Implementation
 
-`channels.py` accepts a `rotor_window_us` parameter (default 100,000µs) separate from `window_us` (33,333µs). `dataset_builder.py` keeps a 100ms rolling event buffer and passes it to the rotor channel generator while passing only the current 33ms slice to channels 1, 2, 4.
+`channels.py` accepts a `rotor_window_us` parameter (default 100,000µs) separate from `window_us` (33,333µs). `build_dataset.py` keeps a 100ms rolling event buffer and passes it to the rotor channel generator while passing only the current 33ms slice to channels 1, 2, 4.
 
 ---
 
