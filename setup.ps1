@@ -11,25 +11,23 @@ Write-Host "=== Drone Detect - environment setup ===" -ForegroundColor Cyan
 Write-Host ""
 
 # ── Check Python ──────────────────────────────────────────────────────────────
-$pyExe = Get-Command python -ErrorAction SilentlyContinue
-if (-not $pyExe) {
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Host "ERROR: python not found. Install Python 3.10+ from python.org" -ForegroundColor Red
     exit 1
 }
 $pyVer = (python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
 Write-Host "Python: $pyVer"
 
-# ── Check venv module ─────────────────────────────────────────────────────────
-$venvCheck = python -m venv --help 2>$null
+# ── Ensure venv module is available ──────────────────────────────────────────
+python -m venv --help 2>$null | Out-Null
 if (-not $?) {
-    Write-Host ""
-    Write-Host "ERROR: venv module not available." -ForegroundColor Red
-    Write-Host "Install Python from python.org (venv is included) or reinstall Python."
-    exit 1
+    Write-Host "venv not found — installing virtualenv as fallback..." -ForegroundColor Yellow
+    pip install virtualenv --quiet
+    virtualenv drone_detect
 }
-
-# Create venv
-python -m venv drone_detect
+else {
+    python -m venv drone_detect
+}
 & ".\drone_detect\Scripts\Activate.ps1"
 
 pip install --upgrade pip --quiet
