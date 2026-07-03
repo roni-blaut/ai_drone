@@ -49,9 +49,10 @@ ai_drone/                              ← git root (this folder)
 ├── pid_annotation_fft.py              ← PID frequency analysis on annotation centroids
 ├── pid_annotation_fft.png             ← FFT output (9.14 Hz PID peak)
 ├── common/                            ← shared modules used by all pipelines
-│   ├── config.py                      ← all settings; calls init_sequence() on import
+│   ├── config.py                      ← all settings; auto-detects environment on import
 │   ├── zip_utils.py                   ← transparent zip/folder access (seq_glob, seq_imread…)
-│   └── make_catalog.py                ← scan zips → catalog.yaml + splits.yaml (shared setup tool)
+│   ├── make_catalog.py                ← scan zips → catalog.yaml + splits.yaml (shared setup tool)
+│   └── gdrive.py                      ← Google Drive folder scan + lazy zip download
 ├── data_from_fred/                    ← FRED dataset sequences (zip or extracted folders)
 │   ├── splits.yaml                    ← which sequence numbers go to train/val/test
 │   ├── catalog.yaml                   ← auto-generated metadata for every zip sequence
@@ -95,7 +96,6 @@ ai_drone/                              ← git root (this folder)
     ├── filters.py                     ← refractory + BAF noise filters
     ├── channels.py                    ← 4-channel generator
     ├── build_dataset.py             ← build YOLO dataset from events.raw (multi-seq)
-    ├── gdrive.py                      ← Google Drive folder scan + lazy zip download
     ├── train_4ch_yolo.py              ← train with 4-channel input
     ├── evaluate.py                    ← compare vs paper baseline
     ├── runs/detect/                   ← inference output (bounding box overlays)
