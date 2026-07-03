@@ -20,7 +20,17 @@ Usage:
 
 import os
 import re
+import ssl
 import requests
+import urllib3
+
+# Corporate networks often run SSL inspection proxies that replace server
+# certificates with a self-signed enterprise certificate.  Python rejects
+# these because the CA is not in the standard trust store.
+# Patching here disables SSL verification for all HTTPS calls in this module
+# (gdown also uses requests internally, so the patch covers it too).
+ssl._create_default_https_context = ssl._create_unverified_context
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def scan_folder(folder_id, api_key=None, timeout=30):
@@ -106,7 +116,7 @@ def _scan_folder_api(folder_id, api_key, timeout=30):
             params["pageToken"] = page_token
 
         try:
-            resp = requests.get(base_url, params=params, timeout=timeout)
+            resp = requests.get(base_url, params=params, timeout=timeout, verify=False)
             resp.raise_for_status()
         except Exception as e:
             print(f"[gdrive] ERROR calling Drive API: {e}")
@@ -144,7 +154,7 @@ def _scan_folder_html(folder_id, timeout=30):
                        "AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
     }
     try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
+        resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
         resp.raise_for_status()
     except Exception as e:
         print(f"[gdrive] ERROR fetching folder page: {e}")
@@ -175,39 +185,107 @@ def _scan_folder_html(folder_id, timeout=30):
     return result
 
 
-def download_folder_all(folder_id, data_dir, quiet=False):
+def download_folder_all(folder_id, data_dir, quiet=False, max_workers=5):
     """
-    Download ALL .zip files from a public Google Drive folder using gdown.
+    Download ALL .zip files from a public Google Drive folder.
 
-    No API key needed — gdown handles the folder listing internally.
-    Skips files that already exist locally.
+    Downloads up to max_workers files in parallel (default: 5).
+    Press Ctrl+C to stop cleanly — in-progress downloads finish, queued ones cancel.
+    Already-present zips are always skipped.
     Returns list of downloaded zip paths.
     """
     try:
         import gdown
     except ImportError:
-        raise ImportError(
-            "gdown is required.\n"
-            "Install with: pip install gdown"
-        )
+        raise ImportError("gdown is required.\nInstall with: pip install gdown")
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
 
     os.makedirs(data_dir, exist_ok=True)
 
-    url = f"https://drive.google.com/drive/folders/{folder_id}"
-    print(f"[gdrive] Downloading all zips from Drive folder → {data_dir}/")
-    print("[gdrive] This may take a while for large folders (~100 sequences)")
+    # Scan folder to get file IDs (no download yet)
+    print("[gdrive] Scanning Drive folder...")
+    id_map = _scan_folder_gdown(folder_id)
+    if not id_map:
+        id_map = _scan_folder_html(folder_id)
+    if not id_map:
+        print("[gdrive] ERROR: could not list folder contents.")
+        print("         Make sure the folder is publicly shared.")
+        return []
 
-    downloaded = gdown.download_folder(
-        url=url,
-        output=data_dir,
-        quiet=quiet,
-        use_cookies=False,
-        resume=True,
-    )
+    # Filter out zips already on disk
+    seq_order = sorted(id_map.keys(), key=lambda x: int(x) if x.isdigit() else 0)
+    to_download = {}
+    n_skipped = 0
+    for seq_id in seq_order:
+        if os.path.isfile(os.path.join(data_dir, f"{seq_id}.zip")):
+            n_skipped += 1
+        else:
+            to_download[seq_id] = id_map[seq_id]
 
-    zips = [p for p in (downloaded or []) if p.endswith(".zip")]
-    print(f"[gdrive] Done — {len(zips)} zip(s) in {data_dir}/")
-    return zips
+    if n_skipped:
+        print(f"[gdrive] {n_skipped} already present — skipping")
+    if not to_download:
+        print("[gdrive] Nothing to download.")
+        return []
+
+    print(f"[gdrive] Downloading {len(to_download)} file(s) → {data_dir}/")
+    print(f"[gdrive] Parallel workers : {max_workers}  |  Press Ctrl+C to stop cleanly")
+    print()
+
+    downloaded = []
+    stop_event = threading.Event()
+
+    def _download_one(seq_id, file_id):
+        if stop_event.is_set():
+            return None
+        out_path = os.path.join(data_dir, f"{seq_id}.zip")
+        url      = f"https://drive.google.com/uc?id={file_id}"
+        try:
+            result = gdown.download(url, out_path, quiet=quiet, resume=True, fuzzy=True)
+            if result and os.path.isfile(out_path):
+                size_mb = os.path.getsize(out_path) // (1024 * 1024)
+                print(f"  [done] {seq_id}.zip  ({size_mb} MB)")
+                return out_path
+            else:
+                print(f"  [skip] {seq_id}.zip  (rate-limited — re-run later)")
+                return None
+        except Exception as e:
+            if not stop_event.is_set():
+                print(f"  [fail] {seq_id}.zip  — {e}")
+            return None
+
+    interrupted = False
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    futures = {
+        executor.submit(_download_one, seq_id, fid): seq_id
+        for seq_id, fid in to_download.items()
+    }
+    try:
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                downloaded.append(result)
+    except KeyboardInterrupt:
+        interrupted = True
+        stop_event.set()
+        print("\n[gdrive] Ctrl+C — cancelling queued downloads...")
+        for f in futures:
+            f.cancel()
+    finally:
+        executor.shutdown(wait=False)
+
+    total = len(to_download)
+    done  = len(downloaded)
+    print()
+    print(f"[gdrive] Done — {done}/{total} downloaded")
+    if interrupted:
+        print(f"[gdrive] {total - done} remaining. Re-run to continue — existing zips are skipped.")
+    elif done < total:
+        print(f"[gdrive] {total - done} rate-limited. Re-run later — existing zips are skipped.")
+
+    return downloaded
 
 
 def download_zip(seq_num, drive_file_id, data_dir, quiet=False):

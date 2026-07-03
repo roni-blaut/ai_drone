@@ -229,8 +229,6 @@ else:
 
 # ── Print summary ─────────────────────────────────────────────────────────────
 
-print(f"[config] Sequence dir : {SEQUENCE_DIR}")
-print(f"[config] Dataset dir  : {DATASET_DIR}")
 print(f"[config] Device       : {DEVICE}")
 print(f"[config] Batch size   : {BATCH}")
 print(f"[config] Epochs       : {EPOCHS}")
