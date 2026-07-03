@@ -23,7 +23,9 @@ import sys
 import fnmatch
 import argparse
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'common'))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_HERE, '..', 'common'))
+sys.path.insert(0, os.path.join(_HERE, '..', '4channel_project'))  # for gdrive.py
 
 try:
     import yaml as _yaml
