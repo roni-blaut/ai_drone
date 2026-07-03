@@ -1,7 +1,16 @@
-# ── GPU (CUDA) install — run this BEFORE pip install -r requirements.txt ──────
-# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-# Replace cu121 with your CUDA version:  cu118  cu121  cu124
-# Check your CUDA version: nvidia-smi   (top-right corner shows "CUDA Version: X.Y")
+# ── GPU install — run the matching line BEFORE pip install -r requirements.txt ─
+#
+# NVIDIA GPU (CUDA):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   Replace cu121 with your CUDA version: cu118  cu121  cu124
+#   Check CUDA version: nvidia-smi  (top-right corner shows "CUDA Version: X.Y")
+#
+# Intel Arc GPU (DirectML, Windows only):
+#   pip install torch torchvision          # standard CPU-build of torch
+#   pip install torch-directml             # Microsoft DirectML backend
+#   config.py auto-detects this and sets device='dml'
+#
+# setup.ps1 / setup.sh handle all of the above automatically.
 # ─────────────────────────────────────────────────────────────────────────────
 
 ultralytics>=8.0.0

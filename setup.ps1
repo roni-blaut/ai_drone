@@ -1,5 +1,8 @@
 # Create drone_detect venv and install all dependencies.
-# Auto-detects CUDA version and installs the matching GPU PyTorch build.
+# Auto-detects GPU type and installs the matching PyTorch build:
+#   NVIDIA GPU   -> pip install torch ... --index-url .../whl/cuXXX
+#   Intel Arc    -> pip install torch-directml  (Microsoft DirectML)
+#   No GPU       -> pip install torch torchvision  (CPU-only)
 #
 # Usage (from ai_drone/):
 #   .\setup.ps1
@@ -21,7 +24,10 @@ $candidates = @(
     "$env:USERPROFILE\miniconda3\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python310\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
-    "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
+    "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+    "C:\Python310\python.exe",
+    "C:\Python311\python.exe",
+    "C:\Python312\python.exe"
 )
 foreach ($c in $candidates) {
     if (Test-Path $c) { $pyExe = $c; break }
@@ -59,14 +65,15 @@ $venvPip = ".\drone_detect\Scripts\pip.exe"
 Write-Host "Upgrading pip inside environment..."
 & $venvPip install --upgrade pip --quiet
 
-# --- PyTorch: GPU or CPU ---
+# --- Detect GPU type ---
+# Priority: NVIDIA (CUDA) > Intel Arc (DirectML) > CPU
+
 # Search for nvidia-smi in common locations if not on PATH
 $nvSmi = $null
 $cmdNvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
 if ($cmdNvidia) {
     $nvSmi = $cmdNvidia.Source
 }
-
 if (-not $nvSmi) {
     $nvPaths = @(
         "C:\Windows\System32\nvidia-smi.exe",
@@ -76,16 +83,44 @@ if (-not $nvSmi) {
 }
 
 if ($nvSmi) {
+    # --- NVIDIA GPU: install CUDA PyTorch ---
     $nvsmiOut = (& $nvSmi) -join " "
     $match = [regex]::Match($nvsmiOut, "CUDA Version: (\d+)\.(\d+)")
     $major = $match.Groups[1].Value
     $minor = $match.Groups[2].Value
     $cu = "cu" + $major + $minor
-    Write-Host "GPU detected: CUDA $major.$minor -> torch index: $cu" -ForegroundColor Green
+    Write-Host "GPU: NVIDIA CUDA $major.$minor -> torch index: $cu" -ForegroundColor Green
     & $venvPip install torch torchvision --index-url "https://download.pytorch.org/whl/$cu" --quiet
+
 } else {
-    Write-Host "No GPU detected - installing CPU-only PyTorch" -ForegroundColor Yellow
-    & $venvPip install torch torchvision --quiet
+    # --- Check for Intel Arc GPU via WMI ---
+    $gpuList = Get-CimInstance -ClassName Win32_VideoController -ErrorAction SilentlyContinue |
+               Select-Object -ExpandProperty Name
+    $gpuNames = ($gpuList -join "|")
+    $isIntelArc = $gpuNames -match "Intel.*(Arc|Xe)"
+
+    if ($isIntelArc) {
+        # --- Intel Arc GPU: install DirectML backend ---
+        $arcName = ($gpuList | Where-Object { $_ -match "Intel.*(Arc|Xe)" }) -join ", "
+        Write-Host "GPU: Intel Arc detected ($arcName)" -ForegroundColor Cyan
+        Write-Host "     Installing torch + torch-directml (Microsoft DirectML for Intel Arc)" -ForegroundColor Cyan
+        # DML works on top of standard CPU-build torch (no CUDA index needed)
+        & $venvPip install torch torchvision --quiet
+        & $venvPip install torch-directml --quiet
+        Write-Host ""
+        Write-Host "NOTE: Training will use device='dml'" -ForegroundColor Cyan
+        Write-Host "      config.py auto-detects torch-directml -- no manual settings needed." -ForegroundColor Cyan
+
+    } else {
+        # --- No supported GPU: CPU-only PyTorch ---
+        if ($gpuNames) {
+            Write-Host "GPU: $gpuNames (no CUDA or DirectML support detected)" -ForegroundColor Yellow
+        } else {
+            Write-Host "GPU: None detected" -ForegroundColor Yellow
+        }
+        Write-Host "Installing CPU-only PyTorch"
+        & $venvPip install torch torchvision --quiet
+    }
 }
 
 # --- Project dependencies ---

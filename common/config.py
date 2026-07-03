@@ -1,17 +1,19 @@
 """
 config.py — All project settings in one place.
 
-Supports 5 environments — auto-detected, no manual changes needed:
+Supports 6 environments — auto-detected, no manual changes needed:
 
   1. Local PC (Windows)   : your VS Code / pip setup
-  2. WSL2                 : Windows Subsystem for Linux with NVIDIA GPU
-  3. Google Colab         : free T4 GPU via Google Drive
-  4. NVIDIA GPU server    : dedicated Linux GPU server
-  5. CPU only             : fallback if no GPU found
+  2. Intel Arc (Windows)  : Intel Arc GPU via Microsoft DirectML backend
+  3. WSL2                 : Windows Subsystem for Linux with NVIDIA GPU
+  4. Google Colab         : free T4 GPU via Google Drive
+  5. NVIDIA GPU server    : dedicated Linux GPU server
+  6. CPU only             : fallback if no GPU found
 
 To force a specific environment (overrides auto-detect):
   Set environment variable before running:
     set DRONE_ENV=local       (Windows cmd)
+    set DRONE_ENV=intel       (Intel Arc / DirectML)
     export DRONE_ENV=wsl      (WSL / Linux)
     set DRONE_ENV=colab
     set DRONE_ENV=nvidia
@@ -40,12 +42,22 @@ except ImportError:
     GPU_AVAILABLE   = False
     GPU_NAME        = "torch not installed"
 
+# ── Intel Arc / DirectML — optional ──────────────────────────────────────────
+
+try:
+    import torch_directml as _dml
+    DML_AVAILABLE = _dml.device_count() > 0
+    DML_NAME      = _dml.device_name(0) if DML_AVAILABLE else "none"
+except (ImportError, Exception):
+    DML_AVAILABLE = False
+    DML_NAME      = "torch-directml not installed"
+
 # ── Environment detection ─────────────────────────────────────────────────────
 
 def _detect_env():
     # 1. Manual override via environment variable
     forced = os.environ.get('DRONE_ENV', '').lower()
-    if forced in ('local', 'wsl', 'colab', 'nvidia', 'cpu'):
+    if forced in ('local', 'intel', 'wsl', 'colab', 'nvidia', 'cpu'):
         print(f"[config] Environment forced: {forced}")
         return forced
 
@@ -56,7 +68,11 @@ def _detect_env():
     except ImportError:
         pass
 
-    # 3. Auto-detect WSL2 (Linux kernel built by Microsoft)
+    # 3. Auto-detect Intel Arc via DirectML (Windows, no CUDA)
+    if not GPU_AVAILABLE and DML_AVAILABLE:
+        return 'intel'
+
+    # 4. Auto-detect WSL2 (Linux kernel built by Microsoft)
     try:
         with open('/proc/version') as _f:
             if 'microsoft' in _f.read().lower():
@@ -64,23 +80,32 @@ def _detect_env():
     except OSError:
         pass
 
-    # 4. Auto-detect NVIDIA server (Linux + GPU + no display, not WSL)
+    # 5. Auto-detect NVIDIA server (Linux + GPU + no display, not WSL)
     if os.name == 'posix' and GPU_AVAILABLE:
         if not os.environ.get('DISPLAY') and not os.environ.get('WAYLAND_DISPLAY'):
             return 'nvidia'
 
-    # 5. Local PC (Windows or Mac with or without GPU)
+    # 6. Local PC (Windows or Mac with or without GPU)
     return 'local'
 
 ENV      = _detect_env()
 IN_COLAB = (ENV == 'colab')
 
 print(f"[config] Running on: {ENV.upper()}")
-print(f"[config] GPU: {GPU_NAME}")
+if ENV == 'intel':
+    print(f"[config] GPU: {DML_NAME}  (DirectML)")
+else:
+    print(f"[config] GPU: {GPU_NAME}")
 
 # ── Paths — per environment ───────────────────────────────────────────────────
 
-if ENV == 'wsl':
+if ENV == 'intel':
+    # Intel Arc GPU (Windows) — DirectML backend via torch-directml
+    SEQUENCE_DIR = os.path.join(_HERE, '..', 'data_from_fred', '7')
+    DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
+    RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
+
+elif ENV == 'wsl':
     # WSL2 — project cloned into WSL filesystem; GPU via CUDA WSL2 driver
     SEQUENCE_DIR = os.path.join(_HERE, '..', 'data_from_fred', '7')
     DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
@@ -176,7 +201,13 @@ IMG_SIZE   = 640
 PATIENCE   = 20
 N_CHANNELS = 4
 
-if ENV == 'wsl':
+if ENV == 'intel':
+    # Intel Arc GPU — DirectML backend; train scripts patch Ultralytics to accept 'dml'
+    EPOCHS  = 100
+    BATCH   = 8     # start conservative; Arc 140T has 16 GB shared — can increase
+    DEVICE  = 'dml'
+
+elif ENV == 'wsl':
     # WSL2 — same GPU settings as local but confirmed CUDA available
     EPOCHS  = 100
     BATCH   = 16

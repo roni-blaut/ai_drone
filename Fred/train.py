@@ -57,6 +57,28 @@ if __name__ == '__main__':
     _patches.imread = _patched_imread
     _base.imread    = _patched_imread
 
+    # ── Intel Arc / DirectML patch ────────────────────────────────────────────
+    # Ultralytics doesn't natively accept 'dml' as a device string.
+    # Intercept select_device and return a torch_directml device object instead.
+    effective_device = DEVICE
+    if str(DEVICE).lower() == 'dml':
+        try:
+            import torch_directml as _dml
+            _dml_dev = _dml.device(0)
+            import ultralytics.utils.torch_utils as _tu
+            _orig_sel = _tu.select_device
+            def _dml_select(device='', batch=0, newline=False, verbose=True):
+                if str(device).lower() == 'dml':
+                    if verbose:
+                        print(f"DirectML device: {_dml.device_name(0)}")
+                    return _dml_dev
+                return _orig_sel(device, batch, newline, verbose)
+            _tu.select_device = _dml_select
+            effective_device  = _dml_dev
+            print(f"Intel Arc GPU: {_dml.device_name(0)}  (DirectML)")
+        except ImportError:
+            print("WARNING: torch-directml not installed. Run: pip install torch-directml")
+            effective_device = 'cpu'
     # ─────────────────────────────────────────────────────────────────────────
 
     from ultralytics import YOLO
@@ -77,7 +99,7 @@ if __name__ == '__main__':
         epochs   = EPOCHS,
         batch    = BATCH,
         imgsz    = 640,
-        device   = DEVICE,
+        device   = effective_device,
         project  = RUNS_DIR,
         name     = RUN_NAME,
         exist_ok = True,
