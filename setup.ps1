@@ -28,9 +28,12 @@ foreach ($c in $candidates) {
 }
 # Fall back to PATH python if it is not the Windows Store stub
 if (-not $pyExe) {
-    $fromPath = (Get-Command python -ErrorAction SilentlyContinue).Source
-    if ($fromPath -and $fromPath -notlike "*WindowsApps*") {
-        $pyExe = $fromPath
+    $cmdPython = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmdPython) {
+        $fromPath = $cmdPython.Source
+        if ($fromPath -and $fromPath -notlike "*WindowsApps*") {
+            $pyExe = $fromPath
+        }
     }
 }
 if (-not $pyExe) {
@@ -49,13 +52,21 @@ if ($LASTEXITCODE -ne 0) {
 } else {
     & $pyExe -m venv drone_detect
 }
-& ".\drone_detect\Scripts\Activate.ps1"
 
-pip install --upgrade pip --quiet
+# Explicitly target the new environment's pip path
+$venvPip = ".\drone_detect\Scripts\pip.exe"
+
+Write-Host "Upgrading pip inside environment..."
+& $venvPip install --upgrade pip --quiet
 
 # --- PyTorch: GPU or CPU ---
 # Search for nvidia-smi in common locations if not on PATH
-$nvSmi = (Get-Command nvidia-smi -ErrorAction SilentlyContinue)?.Source
+$nvSmi = $null
+$cmdNvidia = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+if ($cmdNvidia) {
+    $nvSmi = $cmdNvidia.Source
+}
+
 if (-not $nvSmi) {
     $nvPaths = @(
         "C:\Windows\System32\nvidia-smi.exe",
@@ -71,15 +82,15 @@ if ($nvSmi) {
     $minor = $match.Groups[2].Value
     $cu = "cu" + $major + $minor
     Write-Host "GPU detected: CUDA $major.$minor -> torch index: $cu" -ForegroundColor Green
-    pip install torch torchvision --index-url "https://download.pytorch.org/whl/$cu" --quiet
+    & $venvPip install torch torchvision --index-url "https://download.pytorch.org/whl/$cu" --quiet
 } else {
     Write-Host "No GPU detected - installing CPU-only PyTorch" -ForegroundColor Yellow
-    pip install torch torchvision --quiet
+    & $venvPip install torch torchvision --quiet
 }
 
 # --- Project dependencies ---
 Write-Host "Installing project dependencies..."
-pip install -r requirements.txt --quiet
+& $venvPip install -r requirements.txt --quiet
 
 Write-Host ""
 Write-Host "=== Done ===" -ForegroundColor Cyan
