@@ -29,7 +29,10 @@ sys.path.insert(0, os.path.join(_ROOT, 'common'))
 sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
 from evt3_reader import EVT3Reader
-from config import RAW_FILE, IMG_W, IMG_H
+from config import IMG_W, IMG_H
+
+_DATA        = os.path.join(_ROOT, 'data_from_fred')
+_RAW_DEFAULT = os.path.join(_DATA, '7', 'Event', 'events.raw')
 
 try:
     import matplotlib.pyplot as plt
@@ -41,11 +44,17 @@ except ImportError:
 # â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--raw', type=str, default=RAW_FILE,
-                    help='Path to events.raw')
+parser.add_argument('--seq', type=str, default=None,
+                    help='Sequence number (e.g. 7); sets --raw automatically')
+parser.add_argument('--raw', type=str, default=None,
+                    help='Path to events.raw (overrides --seq)')
 parser.add_argument('--ann', type=str, default=None,
                     help='Path to coordinates.txt (optional)')
 args = parser.parse_args()
+
+if args.raw is None:
+    seq = args.seq or '7'
+    args.raw = os.path.join(_DATA, seq, 'Event', 'events.raw')
 
 print(f"Inspecting: {args.raw}")
 print(f"File size : {os.path.getsize(args.raw)/1e6:.1f} MB\n")

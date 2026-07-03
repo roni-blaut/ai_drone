@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 from evt3_reader import EVT3Reader
 from filters import fast_filter
 from channels import generate_channels
-from config import RAW_FILE, WINDOW_US, IMG_W, IMG_H
+from config import WINDOW_US, IMG_W, IMG_H
 
 try:
     import cv2
@@ -39,6 +39,8 @@ except ImportError:
 # â”€â”€ CLI args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--seq',   type=str,   default='7',
+                    help='Sequence number (default: 7)')
 parser.add_argument('--start', type=float, default=9.87,
                     help='Start time in seconds (default: 9.87 â€” drone appears)')
 parser.add_argument('--end',   type=float, default=35.0,
@@ -48,6 +50,7 @@ parser.add_argument('--delay', type=int,   default=33,
                          'Increase to slow down.')
 args = parser.parse_args()
 
+RAW_FILE   = os.path.join(_ROOT, 'data_from_fred', args.seq, 'Event', 'events.raw')
 T_START_US = int(args.start * 1_000_000)
 T_END_US   = int(args.end   * 1_000_000)
 DELAY_MS   = args.delay

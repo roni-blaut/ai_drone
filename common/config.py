@@ -137,25 +137,14 @@ else:
     DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
     RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
 
-# Initialise zip or real-folder access for SEQUENCE_DIR
-import sys as _sys
-_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) or '.')
-from zip_utils import init_sequence as _init_sequence, seq_exists as _seq_exists
-_init_sequence(SEQUENCE_DIR)
+# Single-sequence path helpers — these are plain strings used by tools/ and
+# build_dataset.py --single.  No zip is opened here; each tool calls
+# zip_utils.init_sequence(seq_dir) itself after parsing its --seq argument.
 
-# Raw event file
-RAW_FILE    = os.path.join(SEQUENCE_DIR, "Event", "events.raw")
-
-# Ground-truth annotations
-# interpolated_coordinates.txt has smoother (float) bboxes vs integer coords in coordinates.txt
-_interp = os.path.join(SEQUENCE_DIR, "interpolated_coordinates.txt")
-COORDS_FILE = _interp if _seq_exists(_interp) else os.path.join(SEQUENCE_DIR, "coordinates.txt")
-
-# Event data
+RAW_FILE       = os.path.join(SEQUENCE_DIR, "Event", "events.raw")
+COORDS_FILE    = os.path.join(SEQUENCE_DIR, "interpolated_coordinates.txt")
 FRAMES_DIR     = os.path.join(SEQUENCE_DIR, "Event", "Frames")
 EVENT_YOLO_DIR = os.path.join(SEQUENCE_DIR, "Event_YOLO")
-
-# RGB data
 RGB_DIR        = os.path.join(SEQUENCE_DIR, "RGB")
 PADDED_RGB_DIR = os.path.join(SEQUENCE_DIR, "PADDED_RGB")
 RGB_YOLO_DIR   = os.path.join(SEQUENCE_DIR, "RGB_YOLO")

@@ -31,15 +31,8 @@ import numpy as np
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
 sys.path.insert(0, os.path.join(_ROOT, 'common'))
 sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
-from config import (
-    IMG_W, IMG_H,
-    SEQUENCE_DIR,
-    FRAMES_DIR,
-    EVENT_YOLO_DIR,
-    PADDED_RGB_DIR,
-    RGB_YOLO_DIR,
-)
-from zip_utils import seq_glob, seq_imread, seq_exists, seq_open_lines
+from config import IMG_W, IMG_H
+from zip_utils import init_sequence, seq_glob, seq_imread, seq_exists, seq_open_lines
 
 try:
     import cv2
@@ -49,6 +42,8 @@ except ImportError:
 # â”€â”€ Args â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--seq',   type=str,   default='7',
+                    help='Sequence number (default: 7)')
 parser.add_argument('--start', type=float, default=None,
                     help='Start time in event-stream seconds (default: first labeled frame)')
 parser.add_argument('--n',     type=int,   default=None,
@@ -59,13 +54,20 @@ parser.add_argument('--save',  type=str,   default=None,
                     help='Save output video (e.g. --save sync.mp4)')
 args = parser.parse_args()
 
+SEQUENCE_DIR   = os.path.join(_ROOT, 'data_from_fred', args.seq)
+FRAMES_DIR     = os.path.join(SEQUENCE_DIR, 'Event', 'Frames')
+EVENT_YOLO_DIR = os.path.join(SEQUENCE_DIR, 'Event_YOLO')
+PADDED_RGB_DIR = os.path.join(SEQUENCE_DIR, 'PADDED_RGB')
+RGB_YOLO_DIR   = os.path.join(SEQUENCE_DIR, 'RGB_YOLO')
+init_sequence(SEQUENCE_DIR)
+
 for d, name in [(FRAMES_DIR,     'Event/Frames/'),
                 (EVENT_YOLO_DIR, 'Event_YOLO/'),
                 (PADDED_RGB_DIR, 'PADDED_RGB/'),
                 (RGB_YOLO_DIR,   'RGB_YOLO/')]:
     if not seq_exists(d):
         print(f"ERROR: {name} not found at:\n  {d}")
-        print(f"\nCheck SEQUENCE_DIR in config.py â€” currently: {SEQUENCE_DIR}")
+        print(f”\nSequence: {SEQUENCE_DIR}\nPlace the extracted folder or .zip in data_from_fred/”)
         sys.exit(1)
 
 
