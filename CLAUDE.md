@@ -38,6 +38,9 @@ PID oscillation detected in FRED sequence 7:
 ```
 ai_drone/                              ← git root (this folder)
 ├── CLAUDE.md                          ← this file
+├── setup.ps1                          ← one-command Windows setup (venv + GPU torch)
+├── setup.sh                           ← one-command WSL/Linux setup (venv + GPU torch)
+├── requirements.txt                   ← pip dependencies (all pipelines)
 ├── 2506.05163v1.pdf                   ← FRED paper (reference)
 ├── fred_step1_download.py             ← HuggingFace download (simplified pipeline)
 ├── fred_step2_convert.py              ← convert FRED annotations → YOLO format
@@ -97,7 +100,6 @@ ai_drone/                              ← git root (this folder)
     ├── evaluate.py                    ← compare vs paper baseline
     ├── runs/detect/                   ← inference output (bounding box overlays)
     ├── README.md                      ← project overview
-    ├── requirements.txt               ← pip dependencies
     ├── environment.yml                ← conda environment
     ├── yolo11n.pt                     ← YOLO base weights
     └── notebooks/                     ← Jupyter notebooks
@@ -152,11 +154,12 @@ Frame naming: `s{seq_num}_{t_start_us:012d}.png` — globally unique across sequ
 
 ## Known Windows issue — OpenMP conflict
 
-Before training on Windows/conda, set:
+Before training on Windows, set:
 ```powershell
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 ```
-Or permanently: `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect`
+Or permanently (conda): `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect`
+Not needed on WSL / Linux.
 
 ## Training status
 
