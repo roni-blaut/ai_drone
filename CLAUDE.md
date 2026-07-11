@@ -86,7 +86,8 @@ ai_drone/                              ← git root (this folder)
 ├── Fred/                              ← Pipelines 1 & 2 (paper baseline)
 │   ├── build_index.py                 ← read frames+labels from zip → YOLO layout on disk
 │   ├── train.py                       ← standard YOLO11n, no channel patch
-│   └── evaluate.py                    ← compare vs paper mAP50
+│   ├── evaluate.py                    ← compare vs paper mAP50
+│   └── infer.py                       ← run trained model on a new/unseen sequence zip
 └── 4channel_project/                  ← Pipeline 3 (our approach)
     ├── evt3_reader.py                 ← EVT3 binary parser (zip-aware via BytesIO)
     ├── filters.py                     ← refractory + BAF noise filters
@@ -231,6 +232,27 @@ $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
 python evaluate.py --mode rgb
 ```
+
+### Inference on a new/unseen sequence zip (Fred/infer.py)
+Run the trained Pipeline 1/2 model against any FRED-format sequence zip — not
+just the ones catalogued in `data_from_fred/splits.yaml`. Reads frames
+directly from the zip (no extraction needed) via `common/zip_utils.py`,
+draws the predicted box, and — if that zip happens to include
+`Event_YOLO/`/`RGB_YOLO/` labels — automatically overlays the original
+ground-truth box too (no flag needed) so you can eyeball prediction vs
+truth. Saves one annotated `.mp4` by default; per-frame PNGs and a live
+preview are opt-in.
+```powershell
+cd Fred
+python infer.py --zip ../data_from_fred/49.zip           # event mode (default)
+python infer.py --zip ../data_from_fred/49.zip --mode rgb # rgb mode (needs rgb weights trained first)
+python infer.py --zip C:\path\to\new_sequence.zip        # any zip, anywhere on disk
+python infer.py --zip ../data_from_fred/49.zip --save-frames out_frames
+python infer.py --zip ../data_from_fred/49.zip --show    # live cv2 preview, SPACE=pause A/D=step Q=quit
+```
+Default weights: `Fred/runs/fred_baseline_{mode}/weights/best.pt` (override with `--weights`).
+Default output video: `Fred/runs/infer/<zip_stem>_<mode>.mp4`.
+Useful flags: `--conf` (default 0.25), `--iou` (default 0.45), `--device` (override auto-detect), `--no-video`.
 
 ### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
 

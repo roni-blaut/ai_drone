@@ -5,11 +5,11 @@
 2.2) need to check the the modle is ruining from zip .. by train , val and test - roni 
 
 3) change the code to support zip file direct - roni - done
-4) need to check if py run on GPU. -Michael or Tomer 
-5) check wights save to file .- Michael.
+4) need to check if py run on GPU. -Michael or Tomer done
+5) check wights save to file .- Michael. 
 6) Add loss funtion - grphe - Tomer 
 7) Git - Tomer 
 8) check Fred and 4channel with only drone  without brid or trace 
-9) need to check roni fix with the notbook from michael.
+9) need to check roni fix with the notbook from michael. remove
 10) Download Dataset - Tomer - done (make_catalog.py --download-all  OR  --scan-drive + build_dataset.py --download)
 11) re arange folder files  - Roni - Done 
