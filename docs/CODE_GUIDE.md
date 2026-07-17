@@ -223,7 +223,19 @@ All helpers fall back to real filesystem if the file exists on disk.
 Wraps `zipfile.ZipFile`. Key method: `_to_member(path)` converts an absolute
 filesystem path back to a zip member name using `os.path.relpath`.
 
-`ts_shift_us` is read from `Event/events.raw.tmp_index` inside the zip during `__init__`.
+Most sequence zips store files at the zip root (`Event/events.raw`,
+`coordinates.txt`, ...). A few are packaged with everything nested one level
+deeper under a single wrapper folder (e.g. seq 2's zip has `2/coordinates.txt`,
+`2/Event/...` instead of `coordinates.txt`, `Event/...`). `_detect_root_prefix()`
+runs once in `__init__`: if none of the well-known root files
+(`coordinates.txt`, `Event/events.raw`) exist directly in the zip but every
+member shares one common top-level path component, that component is treated
+as an implicit `self._root_prefix` and stripped/prepended transparently in
+`_to_member()`. Detection is automatic — not hardcoded to any sequence number
+— so any future zip packaged the same way is handled without code changes.
+
+`ts_shift_us` is read from `{root_prefix}Event/events.raw.tmp_index` inside the
+zip during `__init__` (after `_root_prefix` is resolved).
 
 ---
 
@@ -941,6 +953,7 @@ runs/fred_4channel/
 | Drive download arg error | `unexpected keyword argument 'remaining_ok'` | Update gdrive.py — fixed in commit a995d75 |
 | Drive download fails | `ImportError: gdown is required` | `pip install gdown` |
 | Drive file IDs missing | `no drive_file_id in catalog` | Run `python make_catalog.py --scan-drive` |
+| Zip with wrapped folder structure | `KeyError: "There is no item named 'coordinates.txt' in the archive"` | `ZipSequence` auto-detects a wrapping top-level folder (`_detect_root_prefix()`) and strips it — no action needed, fixed in `zip_utils.py` |
 
 ---
 
