@@ -29,6 +29,9 @@ from config import (
     DEBUG_MODE
 )
 
+from train_4ch_yolo import patch_ultralytics_rgba_imread
+patch_ultralytics_rgba_imread()
+
 PAPER_MAP50 = 87.68   # FRED paper baseline (YOLO v11, 1-channel event frame)
 
 

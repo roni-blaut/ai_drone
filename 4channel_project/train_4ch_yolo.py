@@ -28,6 +28,46 @@ from config import (
     DEBUG_MODE
 )
 
+from ultralytics import YOLO
+
+
+# ── Ultralytics imread patch (module level — see patch_ultralytics_rgba_imread) ──
+
+def patch_ultralytics_rgba_imread():
+    """
+    Force Ultralytics to read RGBA PNGs with all 4 channels intact.
+
+    Ultralytics' own imread (ultralytics.utils.patches.imread) uses
+    cv2.IMREAD_COLOR for any channels != 1 (ultralytics/data/base.py sets
+    cv2_flag=IMREAD_COLOR), which silently drops the alpha channel on our
+    4-channel RGBA PNGs. Patch both the source function and base.py's
+    already-imported local binding to force cv2.IMREAD_UNCHANGED instead.
+
+    Must run at MODULE level (not inside train_with_ultralytics()) and be
+    called unconditionally on import. On Windows, DataLoader workers
+    (workers=8 by default) are separate spawned processes that re-import this
+    script as __mp_main__ to reconstruct pickled objects — they execute all
+    top-level code but skip the `if __name__ == "__main__":` block. A patch
+    applied only inside a function called from that guarded block would never
+    reach worker subprocesses, which would then feed the model unpatched
+    3-channel batches while the model itself (patched once, up front, in the
+    main process) expects 4 — exactly the RuntimeError this avoids.
+    """
+    import ultralytics.utils.patches as _ul_patches
+    import ultralytics.data.base as _ul_base
+    import cv2 as _cv2
+
+    _orig_ul_imread = _ul_patches.imread
+
+    def _imread_rgba(filename, flags=_cv2.IMREAD_COLOR):
+        return _orig_ul_imread(filename, _cv2.IMREAD_UNCHANGED)
+
+    _ul_patches.imread = _imread_rgba
+    _ul_base.imread    = _imread_rgba
+
+
+patch_ultralytics_rgba_imread()
+
 
 # ── Custom Dataset ────────────────────────────────────────────────────────────
 
@@ -204,22 +244,6 @@ def train_with_ultralytics():
       runs/fred_4channel/weights/best.pt  ← best mAP50 so far
       runs/fred_4channel/weights/last.pt  ← most recent epoch
     """
-    from ultralytics import YOLO
-
-    # Ultralytics uses its own imread from ultralytics.utils.patches (not cv2.imread directly).
-    # base.py sets cv2_flag=IMREAD_COLOR for channels≠1, which strips alpha on RGBA PNGs.
-    # Patch both the source function and base.py's local binding to force IMREAD_UNCHANGED.
-    import ultralytics.utils.patches as _ul_patches
-    import ultralytics.data.base as _ul_base
-    import cv2 as _cv2
-    _orig_ul_imread = _ul_patches.imread
-
-    def _imread_rgba(filename, flags=_cv2.IMREAD_COLOR):
-        return _orig_ul_imread(filename, _cv2.IMREAD_UNCHANGED)
-
-    _ul_patches.imread = _imread_rgba
-    _ul_base.imread    = _imread_rgba
-
     yaml_path = os.path.join(DATASET_DIR, 'dataset.yaml')
     if not os.path.exists(yaml_path):
         print(f"ERROR: dataset.yaml not found at {yaml_path}")

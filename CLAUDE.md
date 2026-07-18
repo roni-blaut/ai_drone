@@ -169,6 +169,17 @@ script from scratch. `Fred/train.py` and `Fred/evaluate.py` are guarded with
 workers. If you add new training scripts under `Fred/`, apply the same guard.
 (All `4channel_project/` scripts already follow this pattern.)
 
+**Corollary — runtime monkeypatches must live at module level, not inside the
+guarded block.** Spawned workers re-execute a script's top-level code but skip
+the `if __name__ == '__main__':` body, so any patch a worker also needs to see
+(not just the main process) has to be applied unconditionally at import time.
+`4channel_project/train_4ch_yolo.py`'s `patch_ultralytics_rgba_imread()` — which
+forces Ultralytics to read 4-channel RGBA PNGs instead of silently dropping the
+alpha channel — is called at module scope for exactly this reason. Applying it
+only inside `train_with_ultralytics()` (called from the `__main__` guard) caused
+worker subprocesses to load unpatched 3-channel images while the model expected
+4, raising `RuntimeError: ... expected input[N, 4, ...] ... got 3 channels`.
+
 ## Training status
 
 - Architecture confirmed: layer 0 is `[4, 16, 3, 2]` — 4 input channels ✓

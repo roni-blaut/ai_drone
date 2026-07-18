@@ -759,6 +759,24 @@ Weight initialisation strategy:
 - Initialises new channels with the mean of existing weights
 - This preserves as much pretrained knowledge as possible
 
+### Function: `patch_ultralytics_rgba_imread()`
+
+Module-level function, **called unconditionally at import time** (not inside
+`train_with_ultralytics()`). Monkeypatches `ultralytics.utils.patches.imread`
+and `ultralytics.data.base.imread` to force `cv2.IMREAD_UNCHANGED`, since
+Ultralytics' native `imread` uses `cv2.IMREAD_COLOR` for any `channels != 1`
+and silently drops the alpha channel on our 4-channel RGBA PNGs.
+
+Must live at module scope: on Windows, `model.train()`'s DataLoader workers
+(`workers=8` by default) are spawned subprocesses that re-import this script
+as `__mp_main__`, executing all top-level code but skipping the
+`if __name__ == '__main__':` block. A patch applied only inside a function
+called from that guarded block never reaches worker subprocesses — they would
+load unpatched 3-channel images while the (correctly 4-channel) model expects
+4, raising `RuntimeError: ... expected input[N, 4, ...] ... got 3 channels`.
+`evaluate.py` imports and calls this same function for its own `model.val()`
+call, rather than duplicating the patch.
+
 ### Function: `train_with_ultralytics()`
 
 Uses Ultralytics YOLO API for training.
@@ -954,6 +972,7 @@ runs/fred_4channel/
 | Drive download fails | `ImportError: gdown is required` | `pip install gdown` |
 | Drive file IDs missing | `no drive_file_id in catalog` | Run `python make_catalog.py --scan-drive` |
 | Zip with wrapped folder structure | `KeyError: "There is no item named 'coordinates.txt' in the archive"` | `ZipSequence` auto-detects a wrapping top-level folder (`_detect_root_prefix()`) and strips it — no action needed, fixed in `zip_utils.py` |
+| DataLoader workers see unpatched imread | `RuntimeError: ... expected input[N, 4, ...] ... got 3 channels` during training/eval | Call `patch_ultralytics_rgba_imread()` at module level (not inside a function only reachable from `if __name__=='__main__':`) — Windows `spawn` workers re-import the script but skip the guarded block |
 
 ---
 
