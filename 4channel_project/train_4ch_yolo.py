@@ -157,6 +157,14 @@ def collate_fn(batch):
 
 # ── Modify YOLO first layer ───────────────────────────────────────────────────
 
+def _first_conv_in_channels(model):
+    """Return in_channels of the model's first Conv2d layer, or None if not found."""
+    for _, module in model.model.named_modules():
+        if isinstance(module, nn.Conv2d):
+            return module.in_channels
+    return None
+
+
 def patch_yolo_input_channels(model, n_channels=N_CHANNELS):
     """
     Replace the first Conv2d layer to accept n_channels instead of 3.
@@ -254,13 +262,25 @@ def train_with_ultralytics():
     last_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'last.pt')
     best_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'best.pt')
 
+    model  = None
+    resume = False
+
     if os.path.exists(last_pt):
         print(f"\nCheckpoint found: {last_pt}")
-        print(f"Resuming training from last checkpoint...")
-        model = YOLO(last_pt)
-        resume = True
-    else:
-        print("No checkpoint found — starting fresh training...")
+        ckpt_model    = YOLO(last_pt)
+        ckpt_channels = _first_conv_in_channels(ckpt_model)
+        if ckpt_channels == N_CHANNELS:
+            print(f"Resuming training from last checkpoint...")
+            model  = ckpt_model
+            resume = True
+        else:
+            print(f"WARNING: checkpoint's first conv has {ckpt_channels} input "
+                  f"channels, but N_CHANNELS={N_CHANNELS} — this checkpoint is "
+                  f"incompatible with the current dataset (likely stale from an "
+                  f"earlier/different run). Ignoring it and starting fresh instead.")
+
+    if model is None:
+        print("No compatible checkpoint found — starting fresh training...")
         print(f"Loading base model: {YOLO_MODEL}")
         model = YOLO(YOLO_MODEL)
         print(f"Patching input to {N_CHANNELS} channels...")
@@ -302,6 +322,10 @@ def train_with_ultralytics():
         device   = DEVICE,
         project  = RUNS_DIR,
         name     = RUN_NAME,
+        exist_ok = True,       # reuse the same fixed run folder instead of
+                               # auto-incrementing (fred_4channel2, ...) — the
+                               # checkpoint-resume logic above always looks at
+                               # this exact fixed path
         patience = PATIENCE,
         resume   = resume,     # ← key: tells YOLO to continue from last epoch
         save     = True,       # save best.pt and last.pt after every epoch

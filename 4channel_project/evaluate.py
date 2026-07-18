@@ -29,7 +29,7 @@ from config import (
     DEBUG_MODE
 )
 
-from train_4ch_yolo import patch_ultralytics_rgba_imread
+from train_4ch_yolo import patch_ultralytics_rgba_imread, _first_conv_in_channels
 patch_ultralytics_rgba_imread()
 
 PAPER_MAP50 = 87.68   # FRED paper baseline (YOLO v11, 1-channel event frame)
@@ -55,6 +55,14 @@ def evaluate(model_path=None):
         print(f"  [DEBUG] Device  : {DEVICE}")
         print(f"  [DEBUG] img_size: {IMG_SIZE}")
     model = YOLO(model_path)
+
+    ckpt_channels = _first_conv_in_channels(model)
+    if ckpt_channels != N_CHANNELS:
+        print(f"ERROR: {model_path} is a {ckpt_channels}-channel model, but "
+              f"the dataset ({os.path.join(DATASET_DIR, 'dataset.yaml')}) is "
+              f"{N_CHANNELS}-channel. This checkpoint is stale/incompatible — "
+              f"retrain with train_4ch_yolo.py to produce a matching checkpoint.")
+        return
 
     metrics = model.val(
         data   = os.path.join(DATASET_DIR, 'dataset.yaml'),
