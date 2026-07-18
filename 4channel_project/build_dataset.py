@@ -280,8 +280,8 @@ def build_dataset(
         # If no annotation, this window has no drone — still useful as negative
         # But for initial training, skip unannotated windows to keep it simple
         # Uncomment the next 2 lines to include negative examples:
-        # if ann is None:
-        #     continue
+        if ann is None:
+            continue
 
         # Apply noise filter
         events_clean = fast_filter(events)

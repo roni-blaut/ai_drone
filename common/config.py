@@ -159,6 +159,8 @@ YOLO_MODEL = "yolo11n.pt"
 IMG_SIZE   = 640
 PATIENCE   = 20
 N_CHANNELS = 4
+CACHE      = 'disk'   # cache decoded images to disk (.npy) — avoids re-decoding
+                      # all ~97k 4-channel PNGs from scratch every epoch
 
 if ENV == 'colab':
     # Colab T4 — 15GB VRAM

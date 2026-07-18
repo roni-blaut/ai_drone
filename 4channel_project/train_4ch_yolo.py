@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from config import (
     DATASET_DIR, RUNS_DIR, RUN_NAME,
     YOLO_MODEL, EPOCHS, IMG_SIZE, BATCH, DEVICE, PATIENCE,
-    N_CHANNELS, IMG_W, IMG_H,
+    N_CHANNELS, IMG_W, IMG_H, CACHE,
     DEBUG_MODE
 )
 
@@ -320,6 +320,8 @@ def train_with_ultralytics():
         imgsz    = IMG_SIZE,
         batch    = BATCH,
         device   = DEVICE,
+        cache    = CACHE,      # 'disk' — decode each PNG once, reuse across
+                               # epochs instead of re-decoding ~97k images/epoch
         project  = RUNS_DIR,
         name     = RUN_NAME,
         exist_ok = True,       # reuse the same fixed run folder instead of

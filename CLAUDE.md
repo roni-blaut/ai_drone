@@ -184,7 +184,12 @@ worker subprocesses to load unpatched 3-channel images while the model expected
 
 - Architecture confirmed: layer 0 is `[4, 16, 3, 2]` — 4 input channels ✓
 - Dataset: 49 sequences (0–48) auto-split 70/20/10 via splits.yaml (train: 0–33, val: 34–43, test: 44–48)
-- Checkpoint system: auto-resumes from `runs/fred_4channel/weights/last.pt`
+- Checkpoint system: auto-resumes from `runs/fred_4channel/weights/last.pt`,
+  but only if that checkpoint's first-conv channel count matches `N_CHANNELS`
+  (`_first_conv_in_channels()`) — a stale/incompatible checkpoint (e.g. left
+  over from a different pipeline) is ignored with a warning instead of
+  crashing, and training starts fresh, overwriting the same fixed run folder
+  (`exist_ok=True`) rather than auto-incrementing to `fred_4channel2/`
 - imread fix: patches `ultralytics.utils.patches.imread` + `ultralytics.data.base.imread`
 
 ## build_index.py vs build_dataset.py — what's the difference?
