@@ -36,7 +36,7 @@ sys.path.insert(0, os.path.join(_ROOT, 'common'))
 sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
 from evt3_reader import EVT3Reader
-from config import WINDOW_US, IMG_W, IMG_H
+from config import WINDOW_US, IMG_W, IMG_H, SEQUENCE_DIR, EVENT_YOLO_DIR
 from zip_utils import init_sequence, seq_glob, seq_exists, seq_open_lines
 
 try:
@@ -60,10 +60,15 @@ parser.add_argument('--save',  type=str,   default=None,
                     help='Save to video file (e.g. --save out.mp4)')
 args = parser.parse_args()
 
-_base       = os.path.join(_ROOT, 'data_from_fred', args.seq)
-init_sequence(_base)
-RAW_FILE    = os.path.join(_base, 'Event', 'events.raw')
-EV_YOLO_DIR = os.path.join(_base, 'Event_YOLO')
+# Allow --seq to override paths
+if args.seq != '7':
+    _base = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', args.seq)
+    init_sequence(_base)
+    RAW_FILE    = os.path.join(_base, 'Event', 'events.raw')
+    EV_YOLO_DIR = os.path.join(_base, 'Event_YOLO')
+else:
+    RAW_FILE    = os.path.join(SEQUENCE_DIR, 'Event', 'events.raw')
+    EV_YOLO_DIR = EVENT_YOLO_DIR
 
 for path, label in [(RAW_FILE, 'events.raw'), (EV_YOLO_DIR, 'Event_YOLO/')]:
     if not seq_exists(path):

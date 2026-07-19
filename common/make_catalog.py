@@ -23,8 +23,7 @@ import sys
 import fnmatch
 import argparse
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_HERE, '..', 'common'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'common'))
 
 try:
     import yaml as _yaml

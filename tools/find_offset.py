@@ -14,15 +14,10 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ai_drone/
 sys.path.insert(0, os.path.join(_ROOT, 'common'))
 sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 
-import argparse
 from evt3_reader import EVT3Reader
 from zip_utils import init_sequence, seq_glob
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--seq', type=str, default='7', help='Sequence number (default: 7)')
-args = parser.parse_args()
-
-BASE       = os.path.join(_ROOT, 'data_from_fred', args.seq)
+BASE       = os.path.join(os.path.dirname(__file__), '..', 'data_from_fred', '7')
 RAW_FILE   = os.path.join(BASE, 'Event', 'events.raw')
 FRAMES_DIR = os.path.join(BASE, 'Event', 'Frames')
 

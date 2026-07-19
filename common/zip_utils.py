@@ -39,19 +39,36 @@ class ZipSequence:
         self._seq_dir  = os.path.normpath(seq_dir)
         self._zf       = zipfile.ZipFile(zip_path, 'r')
         self._names    = set(self._zf.namelist())
+        self._root_prefix = self._detect_root_prefix()
         self.ts_shift_us = self._read_ts_shift()
 
     # ── Path conversion ───────────────────────────────────────────────────────
 
+    def _detect_root_prefix(self):
+        """
+        Most sequence zips store files at the zip root (Event/, coordinates.txt, ...).
+        A few are packaged with everything nested one level deeper under a single
+        wrapper folder (e.g. seq 2's zip has '2/coordinates.txt', '2/Event/...').
+        Detect that case so path lookups still resolve correctly.
+        """
+        if 'coordinates.txt' in self._names or 'Event/events.raw' in self._names:
+            return ''
+        tops = {n.split('/', 1)[0] for n in self._names}
+        if len(tops) == 1:
+            prefix = next(iter(tops)) + '/'
+            if any(n.startswith(prefix) for n in self._names):
+                return prefix
+        return ''
+
     def _to_member(self, path):
         """Convert an absolute or relative filesystem path → zip member name."""
         rel = os.path.relpath(os.path.normpath(path), self._seq_dir)
-        return rel.replace('\\', '/')
+        return self._root_prefix + rel.replace('\\', '/')
 
     # ── ts_shift from companion index file inside zip ─────────────────────────
 
     def _read_ts_shift(self):
-        m = 'Event/events.raw.tmp_index'
+        m = self._root_prefix + 'Event/events.raw.tmp_index'
         if m not in self._names:
             return 0
         content = self._zf.read(m).decode('ascii', errors='ignore')

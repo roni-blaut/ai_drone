@@ -20,9 +20,7 @@ sys.path.insert(0, os.path.join(_ROOT, '4channel_project'))
 from evt3_reader import EVT3Reader
 from filters import fast_filter
 from channels import generate_channels, channels_to_rgb_preview
-
-_DATA    = os.path.join(_ROOT, 'data_from_fred')
-RAW_FILE = os.path.join(_DATA, '7', 'Event', 'events.raw')
+from config import RAW_FILE
 
 try:
     import cv2

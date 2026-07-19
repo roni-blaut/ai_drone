@@ -1,7 +1,10 @@
 ﻿# EVT3 Reader Fixes
 
-Two bugs were found and fixed in `evt3_reader.py` that caused incorrect timestamps
-when reading Prophesee EVT3 raw files.
+Three bugs were found and fixed related to reading Prophesee EVT3 raw files
+and their companion sequence zips: two in `evt3_reader.py` causing incorrect
+timestamps, and one in `zip_utils.py` causing zip member lookups to fail for
+a non-standard zip layout (affecting `EVT3Reader` and every other zip reader
+alike, since they all go through `ZipSequence`).
 
 ---
 
@@ -117,13 +120,73 @@ same displayed timestamp. `verify_frames.py` reports MAE < 10 across all frames.
 
 ---
 
+## Fix 3 — Wrapped Zip Folder Structure
+
+### The problem
+
+`ZipSequence` (`common/zip_utils.py`) converts filesystem paths to zip member
+names by taking the path relative to the sequence directory
+(`_to_member()`), assuming every sequence zip stores its files at the zip
+root — `Event/events.raw`, `coordinates.txt`, etc. — same as the
+`common/zip_utils.py` docstring states.
+
+`data_from_fred/2.zip` breaks that assumption: it nests **all** of its files
+one level deeper, under an extra `2/` folder (`2/coordinates.txt`,
+`2/Event/events.raw`, ...), while every other sequence zip (0, 1, 3-49) is
+laid out normally.
+
+**Without correction:** `_to_member()` computes `coordinates.txt` for
+sequence 2's annotation file, but the zip only contains `2/coordinates.txt`
+— the lookup misses, `_find_coords()` falls back to the plain
+`coordinates.txt` path (also missing), and `load_annotations()` crashes with:
+```
+KeyError: "There is no item named 'coordinates.txt' in the archive"
+```
+`EVT3Reader.open_binary()` and `ZipSequence._read_ts_shift()` (which reads
+`Event/events.raw.tmp_index`) would fail the same way for this sequence,
+since both go through `_to_member()` / a hardcoded root-relative member name.
+
+### The fix
+
+`ZipSequence.__init__` calls a new `_detect_root_prefix()` after building
+`self._names`:
+
+```python
+def _detect_root_prefix(self):
+    if 'coordinates.txt' in self._names or 'Event/events.raw' in self._names:
+        return ''
+    tops = {n.split('/', 1)[0] for n in self._names}
+    if len(tops) == 1:
+        prefix = next(iter(tops)) + '/'
+        if any(n.startswith(prefix) for n in self._names):
+            return prefix
+    return ''
+```
+
+If the well-known root markers exist directly in the zip, behavior is
+unchanged (`self._root_prefix = ''`). Otherwise, if every member shares one
+common top-level path component, that component is treated as an implicit
+wrapper directory and stored as `self._root_prefix`. `_to_member()` and
+`_read_ts_shift()` both prepend `self._root_prefix` when resolving member
+names, so every other method (`open_binary`, `open_lines`, `read_bytes`,
+`imread`, `glob`, `exists`) picks up the fix automatically since they all
+funnel through `_to_member()`.
+
+**Result:** sequence 2 loads annotations, raw events, and `ts_shift_us`
+exactly like every other sequence, with no special-casing by sequence number
+— any future zip packaged the same way is handled automatically.
+
+---
+
 ## Summary
 
 | Fix | Root cause | Symptom | Solution |
 |---|---|---|---|
 | Rollover | 24-bit counter resets every 16.777s | Multiple overlapping drone positions | Track `TIME_HIGH` decreases, add 2²⁴ per rollover |
 | ts_shift | SDK applies 1.163s clock offset to Frames/ | Raw 1 second behind Frames/ | Skip first `ts_shift_us` µs; offset Frames/ lookup |
+| Wrapped zip folder | seq 2's zip nests everything under an extra `2/` folder | `KeyError: "There is no item named 'coordinates.txt' in the archive"` | Auto-detect a shared top-level wrapper folder and strip it in `ZipSequence._to_member()` |
 
-Both fixes are in `evt3_reader.py` and `raw_to_movie.py`. All downstream scripts
-(`build_dataset.py`, `make_filter_movie.py`, `view_raw_events.py`) benefit
-automatically because they all use `EVT3Reader`.
+Fixes 1-2 are in `evt3_reader.py` and `raw_to_movie.py`; fix 3 is in
+`zip_utils.py`. All downstream scripts (`build_dataset.py`,
+`make_filter_movie.py`, `view_raw_events.py`) benefit automatically because
+they all use `EVT3Reader` and `ZipSequence`.

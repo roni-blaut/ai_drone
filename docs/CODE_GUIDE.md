@@ -181,6 +181,7 @@ Sets paths and training parameters accordingly:
 | `N_CHANNELS` | 4 | Number of input channels to YOLO |
 | `BATCH` | 8 | Training batch size |
 | `EPOCHS` | 100 | Training epochs |
+| `CACHE` | `'disk'` | Ultralytics image cache mode — decode each PNG once (`.npy` next to the source image) and reuse across epochs instead of re-decoding all ~97k 4-channel images every epoch. `'disk'` chosen over `'ram'` because the estimated full cache size (~108GB for train+val) is too close to this machine's available RAM (~103GB) to risk safely |
 
 ---
 
@@ -223,7 +224,19 @@ All helpers fall back to real filesystem if the file exists on disk.
 Wraps `zipfile.ZipFile`. Key method: `_to_member(path)` converts an absolute
 filesystem path back to a zip member name using `os.path.relpath`.
 
-`ts_shift_us` is read from `Event/events.raw.tmp_index` inside the zip during `__init__`.
+Most sequence zips store files at the zip root (`Event/events.raw`,
+`coordinates.txt`, ...). A few are packaged with everything nested one level
+deeper under a single wrapper folder (e.g. seq 2's zip has `2/coordinates.txt`,
+`2/Event/...` instead of `coordinates.txt`, `Event/...`). `_detect_root_prefix()`
+runs once in `__init__`: if none of the well-known root files
+(`coordinates.txt`, `Event/events.raw`) exist directly in the zip but every
+member shares one common top-level path component, that component is treated
+as an implicit `self._root_prefix` and stripped/prepended transparently in
+`_to_member()`. Detection is automatic — not hardcoded to any sequence number
+— so any future zip packaged the same way is handled without code changes.
+
+`ts_shift_us` is read from `{root_prefix}Event/events.raw.tmp_index` inside the
+zip during `__init__` (after `_root_prefix` is resolved).
 
 ---
 
@@ -723,6 +736,13 @@ Custom PyTorch collate function needed because each image can have a different n
 
 Adds batch index as first column: `[batch_idx, class, cx, cy, w, h]`
 
+### Function: `_first_conv_in_channels(model)`
+
+Returns the `in_channels` of the model's first `Conv2d` layer (or `None` if
+none found). Used as a compatibility guard by both `train_4ch_yolo.py`
+(checkpoint-resume check) and `evaluate.py` (pre-`model.val()` check) to
+detect a stale/incompatible checkpoint before feeding it 4-channel data.
+
 ### Function: `patch_yolo_input_channels(model, n_channels=4)`
 
 Safety patch — modifies the first `Conv2d` layer to accept `n_channels` inputs
@@ -747,15 +767,57 @@ Weight initialisation strategy:
 - Initialises new channels with the mean of existing weights
 - This preserves as much pretrained knowledge as possible
 
+### Function: `patch_ultralytics_rgba_imread()`
+
+Module-level function, **called unconditionally at import time** (not inside
+`train_with_ultralytics()`). Monkeypatches `ultralytics.utils.patches.imread`
+and `ultralytics.data.base.imread` to force `cv2.IMREAD_UNCHANGED`, since
+Ultralytics' native `imread` uses `cv2.IMREAD_COLOR` for any `channels != 1`
+and silently drops the alpha channel on our 4-channel RGBA PNGs.
+
+Must live at module scope: on Windows, `model.train()`'s DataLoader workers
+(`workers=8` by default) are spawned subprocesses that re-import this script
+as `__mp_main__`, executing all top-level code but skipping the
+`if __name__ == '__main__':` block. A patch applied only inside a function
+called from that guarded block never reaches worker subprocesses — they would
+load unpatched 3-channel images while the (correctly 4-channel) model expects
+4, raising `RuntimeError: ... expected input[N, 4, ...] ... got 3 channels`.
+`evaluate.py` imports and calls this same function for its own `model.val()`
+call, rather than duplicating the patch.
+
 ### Function: `train_with_ultralytics()`
 
 Uses Ultralytics YOLO API for training.
 
-1. Checks for `runs/fred_4channel/weights/last.pt` — resumes if found
+1. Checks for `runs/fred_4channel/weights/last.pt` — if found, loads it and
+   compares its first-conv channel count (`_first_conv_in_channels()`)
+   against `N_CHANNELS`. Only resumes if they match; otherwise prints a
+   warning and falls through to step 2 as if no checkpoint existed (guards
+   against resuming a stale/incompatible checkpoint — e.g. one left over from
+   a different pipeline — which would otherwise crash with a channel-mismatch
+   `RuntimeError` on the first batch)
 2. Otherwise loads YOLO v11 nano pretrained weights and patches first layer
-3. Calls `model.train()` with settings from `config.py`
+3. Calls `model.train()` with settings from `config.py`, passing
+   `exist_ok=True` so a fresh run reuses the same fixed `runs/fred_4channel/`
+   folder (overwriting any rejected/incompatible checkpoint) instead of
+   Ultralytics auto-incrementing to `fred_4channel2/`, which would leave
+   `evaluate.py` pointed at the old files
 4. Saves `best.pt` (best mAP50) and `last.pt` (latest epoch) automatically
 5. Also saves a checkpoint every 10 epochs (`save_period=10`)
+
+Also passes `cache=CACHE` (`'disk'`, from `config.py`) so Ultralytics decodes
+each 4-channel PNG once and reuses it across epochs instead of re-decoding
+all ~97k training images every epoch — this was the main fix for slow
+epochs (dataset size was the dominant factor; GPU/device selection was
+already correct). See `common/config.py`'s `CACHE` entry in the Key
+parameters table for the `'disk'` vs `'ram'` sizing tradeoff.
+
+**Caveat:** if you rebuild the dataset (`build_dataset.py` rerun) with
+different image *content* but the same dimensions, the `.npy` disk cache
+files sitting next to the old PNGs won't be auto-invalidated — Ultralytics
+only detects a stale cache by channel-count/shape mismatch, not content
+changes. Delete `4channel_project/dataset/images/*.npy` after regenerating
+the dataset to force a fresh decode.
 
 Augmentation settings (event-camera appropriate):
 - `hsv_h=0, hsv_s=0` — no colour shifts (event frames have no colour)
@@ -773,6 +835,13 @@ OpenMP DLL conflict (`OMP Error #15`) between conda's MKL and PyTorch's OpenMP.
 **Purpose:** Measure mAP50 of the trained model and compare against the FRED paper baseline (87.68%).
 
 ### Function: `evaluate(model_path)`
+
+Before calling `model.val()`, checks the loaded model's first-conv channel
+count via `_first_conv_in_channels()` (imported from `train_4ch_yolo.py`)
+against `N_CHANNELS`. On mismatch (e.g. `model_path` points at a stale
+checkpoint from a different pipeline), prints a clear error naming the
+mismatch and returns immediately instead of letting `model.val()` crash with
+a cryptic PyTorch `RuntimeError`.
 
 Runs `model.val()` on the validation split and prints:
 
@@ -941,6 +1010,9 @@ runs/fred_4channel/
 | Drive download arg error | `unexpected keyword argument 'remaining_ok'` | Update gdrive.py — fixed in commit a995d75 |
 | Drive download fails | `ImportError: gdown is required` | `pip install gdown` |
 | Drive file IDs missing | `no drive_file_id in catalog` | Run `python make_catalog.py --scan-drive` |
+| Zip with wrapped folder structure | `KeyError: "There is no item named 'coordinates.txt' in the archive"` | `ZipSequence` auto-detects a wrapping top-level folder (`_detect_root_prefix()`) and strips it — no action needed, fixed in `zip_utils.py` |
+| DataLoader workers see unpatched imread | `RuntimeError: ... expected input[N, 4, ...] ... got 3 channels` during training/eval | Call `patch_ultralytics_rgba_imread()` at module level (not inside a function only reachable from `if __name__=='__main__':`) — Windows `spawn` workers re-import the script but skip the guarded block |
+| Stale/incompatible checkpoint reused | `RuntimeError` channel mismatch in training or `evaluate.py` (e.g. `expected ... to have 4 channels, but got 3`, or the reverse) | Checkpoint resume now checks channel count via `_first_conv_in_channels()`; incompatible checkpoints are ignored with a warning (train, falls back to a fresh patched model) or rejected with a clear message (evaluate, before calling `model.val()`) instead of crashing |
 
 ---
 

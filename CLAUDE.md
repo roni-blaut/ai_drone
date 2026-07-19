@@ -49,10 +49,9 @@ ai_drone/                              ← git root (this folder)
 ├── pid_annotation_fft.py              ← PID frequency analysis on annotation centroids
 ├── pid_annotation_fft.png             ← FFT output (9.14 Hz PID peak)
 ├── common/                            ← shared modules used by all pipelines
-│   ├── config.py                      ← all settings; auto-detects environment on import
+│   ├── config.py                      ← all settings; calls init_sequence() on import
 │   ├── zip_utils.py                   ← transparent zip/folder access (seq_glob, seq_imread…)
-│   ├── make_catalog.py                ← scan zips → catalog.yaml + splits.yaml (shared setup tool)
-│   └── gdrive.py                      ← Google Drive folder scan + lazy zip download
+│   └── make_catalog.py                ← scan zips → catalog.yaml + splits.yaml (shared setup tool)
 ├── data_from_fred/                    ← FRED dataset sequences (zip or extracted folders)
 │   ├── splits.yaml                    ← which sequence numbers go to train/val/test
 │   ├── catalog.yaml                   ← auto-generated metadata for every zip sequence
@@ -90,12 +89,14 @@ ai_drone/                              ← git root (this folder)
 ├── Fred/                              ← Pipelines 1 & 2 (paper baseline)
 │   ├── build_index.py                 ← read frames+labels from zip → YOLO layout on disk
 │   ├── train.py                       ← standard YOLO11n, no channel patch
-│   └── evaluate.py                    ← compare vs paper mAP50
+│   ├── evaluate.py                    ← compare vs paper mAP50
+│   └── infer.py                       ← run trained model on a new/unseen sequence zip
 └── 4channel_project/                  ← Pipeline 3 (our approach)
     ├── evt3_reader.py                 ← EVT3 binary parser (zip-aware via BytesIO)
     ├── filters.py                     ← refractory + BAF noise filters
     ├── channels.py                    ← 4-channel generator
     ├── build_dataset.py             ← build YOLO dataset from events.raw (multi-seq)
+    ├── gdrive.py                      ← Google Drive folder scan + lazy zip download
     ├── train_4ch_yolo.py              ← train with 4-channel input
     ├── evaluate.py                    ← compare vs paper baseline
     ├── runs/detect/                   ← inference output (bounding box overlays)
@@ -125,11 +126,13 @@ otherwise the matching `.zip` is opened transparently.
 
 ## Multi-sequence dataset (Pipeline 3)
 
-Sequences are assigned to splits via `data_from_fred/splits.yaml`:
+Sequences are assigned to splits via `data_from_fred/splits.yaml`.
+Current split (49 sequences, 0–48, auto-generated 70/20/10):
 ```yaml
-train: [4, 7, 10, 31]
-val:   [52]
-test:  []
+train: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+        19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]
+val:   [34, 35, 36, 37, 38, 39, 40, 41, 42, 43]
+test:  [44, 45, 46, 47, 48]
 ```
 Each zip is used as a whole unit for one split — no per-frame random splitting.
 
@@ -181,11 +184,35 @@ $env:KMP_DUPLICATE_LIB_OK="TRUE"
 Or permanently (conda): `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect`
 Not needed on WSL / Linux.
 
+## Known Windows issue — DataLoader multiprocessing (Fred/ scripts)
+
+On Windows, `multiprocessing` uses spawn — every DataLoader worker re-imports the
+script from scratch. `Fred/train.py` and `Fred/evaluate.py` are guarded with
+`if __name__ == '__main__':` to prevent top-level training code from re-running in
+workers. If you add new training scripts under `Fred/`, apply the same guard.
+(All `4channel_project/` scripts already follow this pattern.)
+
+**Corollary — runtime monkeypatches must live at module level, not inside the
+guarded block.** Spawned workers re-execute a script's top-level code but skip
+the `if __name__ == '__main__':` body, so any patch a worker also needs to see
+(not just the main process) has to be applied unconditionally at import time.
+`4channel_project/train_4ch_yolo.py`'s `patch_ultralytics_rgba_imread()` — which
+forces Ultralytics to read 4-channel RGBA PNGs instead of silently dropping the
+alpha channel — is called at module scope for exactly this reason. Applying it
+only inside `train_with_ultralytics()` (called from the `__main__` guard) caused
+worker subprocesses to load unpatched 3-channel images while the model expected
+4, raising `RuntimeError: ... expected input[N, 4, ...] ... got 3 channels`.
+
 ## Training status
 
 - Architecture confirmed: layer 0 is `[4, 16, 3, 2]` — 4 input channels ✓
-- Dataset: multi-sequence from splits.yaml (train: seqs 4,7,10,31 / val: seq 52)
-- Checkpoint system: auto-resumes from `runs/fred_4channel/weights/last.pt`
+- Dataset: 49 sequences (0–48) auto-split 70/20/10 via splits.yaml (train: 0–33, val: 34–43, test: 44–48)
+- Checkpoint system: auto-resumes from `runs/fred_4channel/weights/last.pt`,
+  but only if that checkpoint's first-conv channel count matches `N_CHANNELS`
+  (`_first_conv_in_channels()`) — a stale/incompatible checkpoint (e.g. left
+  over from a different pipeline) is ignored with a warning instead of
+  crashing, and training starts fresh, overwriting the same fixed run folder
+  (`exist_ok=True`) rather than auto-incrementing to `fred_4channel2/`
 - imread fix: patches `ultralytics.utils.patches.imread` + `ultralytics.data.base.imread`
 
 ## build_index.py vs build_dataset.py — what's the difference?
@@ -244,6 +271,27 @@ $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python train.py --mode rgb
 python evaluate.py --mode rgb
 ```
+
+### Inference on a new/unseen sequence zip (Fred/infer.py)
+Run the trained Pipeline 1/2 model against any FRED-format sequence zip — not
+just the ones catalogued in `data_from_fred/splits.yaml`. Reads frames
+directly from the zip (no extraction needed) via `common/zip_utils.py`,
+draws the predicted box, and — if that zip happens to include
+`Event_YOLO/`/`RGB_YOLO/` labels — automatically overlays the original
+ground-truth box too (no flag needed) so you can eyeball prediction vs
+truth. Saves one annotated `.mp4` by default; per-frame PNGs and a live
+preview are opt-in.
+```powershell
+cd Fred
+python infer.py --zip ../data_from_fred/49.zip           # event mode (default)
+python infer.py --zip ../data_from_fred/49.zip --mode rgb # rgb mode (needs rgb weights trained first)
+python infer.py --zip C:\path\to\new_sequence.zip        # any zip, anywhere on disk
+python infer.py --zip ../data_from_fred/49.zip --save-frames out_frames
+python infer.py --zip ../data_from_fred/49.zip --show    # live cv2 preview, SPACE=pause A/D=step Q=quit
+```
+Default weights: `Fred/runs/fred_baseline_{mode}/weights/best.pt` (override with `--weights`).
+Default output video: `Fred/runs/infer/<zip_stem>_<mode>.mp4`.
+Useful flags: `--conf` (default 0.25), `--iou` (default 0.45), `--device` (override auto-detect), `--no-video`.
 
 ### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
 
