@@ -38,6 +38,9 @@ PID oscillation detected in FRED sequence 7:
 ```
 ai_drone/                              ← git root (this folder)
 ├── CLAUDE.md                          ← this file
+├── setup.ps1                          ← one-command Windows setup (venv + GPU torch)
+├── setup.sh                           ← one-command WSL/Linux setup (venv + GPU torch)
+├── requirements.txt                   ← pip dependencies (all pipelines)
 ├── 2506.05163v1.pdf                   ← FRED paper (reference)
 ├── fred_step1_download.py             ← HuggingFace download (simplified pipeline)
 ├── fred_step2_convert.py              ← convert FRED annotations → YOLO format
@@ -98,7 +101,6 @@ ai_drone/                              ← git root (this folder)
     ├── evaluate.py                    ← compare vs paper baseline
     ├── runs/detect/                   ← inference output (bounding box overlays)
     ├── README.md                      ← project overview
-    ├── requirements.txt               ← pip dependencies
     ├── environment.yml                ← conda environment
     ├── yolo11n.pt                     ← YOLO base weights
     └── notebooks/                     ← Jupyter notebooks
@@ -153,13 +155,34 @@ Frame naming: `s{seq_num}_{t_start_us:012d}.png` — globally unique across sequ
   - Ultralytics reads `channels: 4` and adjusts first Conv2d automatically
   - imread patch in train_4ch_yolo.py forces `cv2.IMREAD_UNCHANGED` to preserve alpha
 
+## Intel Arc GPU support (Windows)
+
+Intel Arc GPUs (e.g. Arc Pro 140T) use Microsoft's **DirectML** backend — not CUDA.
+`setup.ps1` auto-detects Intel Arc via WMI and installs `torch-directml` automatically.
+`config.py` detects `torch_directml` at import time and sets `ENV='intel'`, `DEVICE='dml'`.
+Both train scripts patch `ultralytics.utils.torch_utils.select_device` to return the
+DirectML device object when `device='dml'` — no manual settings needed.
+
+Manual install (if running setup.ps1 already completed):
+```powershell
+pip install torch torchvision          # CPU-build torch (DML doesn't need CUDA)
+pip install torch-directml             # Microsoft DirectML
+```
+
+Force Intel mode on any machine:
+```powershell
+$env:DRONE_ENV="intel"
+python 4channel_project/train_4ch_yolo.py
+```
+
 ## Known Windows issue — OpenMP conflict
 
-Before training on Windows/conda, set:
+Before training on Windows, set:
 ```powershell
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
 ```
-Or permanently: `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect`
+Or permanently (conda): `conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect`
+Not needed on WSL / Linux.
 
 ## Known Windows issue — DataLoader multiprocessing (Fred/ scripts)
 

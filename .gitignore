@@ -6,6 +6,10 @@ data_from_fred/*
 # Python
 __pycache__/
 *.pyc
+*.pyo
+
+# Virtual environment
+drone_detect/
 
 # Training outputs
 runs/

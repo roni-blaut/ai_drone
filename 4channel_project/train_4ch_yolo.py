@@ -241,6 +241,40 @@ def patch_yolo_input_channels(model, n_channels=N_CHANNELS):
 
 # ── Training with Ultralytics API ─────────────────────────────────────────────
 
+def _patch_directml(device):
+    """
+    Patch Ultralytics select_device so it returns a torch_directml device object
+    when device='dml'.  Must be called before model.train().
+
+    Intel Arc GPU on Windows uses Microsoft DirectML (torch-directml package).
+    Ultralytics doesn't natively understand 'dml', so we intercept select_device
+    and return the correct device object ourselves.
+    """
+    if str(device).lower() != 'dml':
+        return device  # nothing to do for CUDA / CPU
+
+    try:
+        import torch_directml as _dml_mod
+        _dml_device = _dml_mod.device(0)
+    except ImportError:
+        print("WARNING: torch-directml not installed. Run: pip install torch-directml")
+        print("         Falling back to CPU.")
+        return 'cpu'
+
+    import ultralytics.utils.torch_utils as _tu
+    _orig_select = _tu.select_device
+
+    def _dml_select(device='', batch=0, newline=False, verbose=True):
+        if str(device).lower() == 'dml':
+            if verbose:
+                print(f"DirectML device: {_dml_mod.device_name(0)}")
+            return _dml_device
+        return _orig_select(device, batch, newline, verbose)
+
+    _tu.select_device = _dml_select
+    return _dml_device
+
+
 def train_with_ultralytics():
     """
     Use Ultralytics YOLO API for training.
@@ -366,10 +400,15 @@ if __name__ == "__main__":
         print("Run first:  python build_dataset.py")
         sys.exit(1)
 
-    # Check device
-    if DEVICE != "cpu":
+    # Check device availability
+    if DEVICE == 'dml':
+        try:
+            import torch_directml as _dml
+            print(f"Intel Arc GPU: {_dml.device_name(0)}  (DirectML)")
+        except ImportError:
+            print("WARNING: torch-directml not installed. Run: pip install torch-directml")
+    elif DEVICE != 'cpu':
         if not torch.cuda.is_available():
-            print("WARNING: CUDA not available, falling back to CPU")
-            print("Training will be slow. Consider DEVICE='cpu' in config.py")
+            print("WARNING: CUDA not available — set DRONE_ENV=cpu or install GPU PyTorch")
 
     train_with_ultralytics()
