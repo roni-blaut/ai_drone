@@ -8,17 +8,19 @@ extending the FRED dataset paper (87.68 mAP50) with 4 physically motivated chann
 ## The core idea
 
 The FRED paper feeds YOLO one accumulated 33ms event frame — discarding polarity,
-motion direction, and motor frequency. We replace it with 4 channels:
+motion direction, and motor frequency. We replace it with up to 4 channels
+(default `DRONE_CHANNELS=4`; see "Dataset format" below for the `DRONE_CHANNELS=3`
+variant that drops channel 3):
 
 | Channel | Content | Physical meaning |
 |---|---|---|
 | 1 | Positive polarity events | Leading edge — where drone is going |
 | 2 | Negative polarity events | Trailing edge — where drone came from |
-| 3 | Rotor frequency map | Spinning motor signature (unique to drones) |
-| 4 | Time surface | Most recent activity per pixel |
+| 3 | Rotor frequency map (only when DRONE_CHANNELS=4) | Spinning motor signature (unique to drones) |
+| 4 (or 3, if channel 3 is dropped) | Time surface | Most recent activity per pixel |
 
-Only change to YOLO: first Conv2d layer from in_channels=3 to in_channels=4.
-Ultralytics reads `channels: 4` from dataset.yaml and applies this automatically.
+Only change to YOLO: first Conv2d layer from in_channels=3 to in_channels=N_CHANNELS (3 or 4).
+Ultralytics reads `channels:` from dataset.yaml and applies this automatically.
 
 ## Key confirmed result
 
@@ -31,7 +33,7 @@ PID oscillation detected in FRED sequence 7:
 |---|---|---|---|
 | 1 | `Fred/` | FRED paper baseline — event frames (33ms PNGs, 3-ch) | 87.68% |
 | 2 | `Fred/` | FRED paper baseline — RGB camera (30fps JPGs, 3-ch) | 76.23% |
-| 3 | `4channel_project/` | Our 4-channel physics pipeline | > 87.68% |
+| 3 | `4channel_project/` | Our physics-channel pipeline (3 or 4 channels, DRONE_CHANNELS) | > 87.68% |
 
 ## Project files
 
@@ -145,7 +147,8 @@ Add `--shuffle` to randomize which sequences land in which split instead of taki
 numeric order — still reproducible run-to-run (seeded with `config.RANDOM_SEED`). Omit it to
 keep the original deterministic numeric-order behavior.
 
-Generated 4-channel PNGs go into `4channel_project/dataset/images/` (flat folder).
+Generated PNGs go into `4channel_project/dataset/images/` (or `dataset_3ch/images/`
+for `DRONE_CHANNELS=3` — see "Dataset format" below), flat folder.
 Split membership is recorded in `dataset/train.txt`, `val.txt`, `test.txt`.
 `dataset/dataset.yaml` references these txt files (Ultralytics txt-path format).
 
@@ -235,7 +238,7 @@ worker subprocesses to load unpatched 3-channel images while the model expected
 | **Input** | Pre-rendered PNGs/JPGs already inside the zip | Raw `events.raw` binary (must be parsed) |
 | **Processing** | Writes label `.txt` files; images stay in zip | EVT3 decode → noise filter → 4-channel generation → save PNGs |
 | **Output images** | 0 — images served from zip at train time | ~3,100 × N sequences new PNGs written to disk |
-| **Channels** | 3 (standard RGB or event frame) | 4 (pos / neg / rotor / time surface) |
+| **Channels** | 3 (standard RGB or event frame) | 3 or 4 — `DRONE_CHANNELS` (pos / neg [/ rotor] / time surface) |
 | **Label source** | `Event_YOLO/` or `RGB_YOLO/` (pre-annotated per frame) | `coordinates.txt` matched to 33ms time windows |
 | **Speed** | Fast (no computation, just file I/O) | Slow (signal processing per window) |
 | **Mental model** | "Make an index" | "Compute and save new data" |
@@ -306,7 +309,15 @@ Default weights: `Fred/runs/fred_baseline_{mode}/weights/best.pt` (override with
 Default output video: `Fred/runs/infer/<zip_stem>_<mode>.mp4`.
 Useful flags: `--conf` (default 0.25), `--iou` (default 0.45), `--device` (override auto-detect), `--no-video`.
 
-### Pipeline 3 — 4-channel physics (target: > 87.68% mAP50)
+### Pipeline 3 — physics channels (target: > 87.68% mAP50)
+
+**Channel count:** every command below defaults to `DRONE_CHANNELS=4` (all 4
+physics channels). Set `DRONE_CHANNELS=3` (env var) to drop the rotor
+channel instead — see "Dataset format" above for what changes. The two
+variants write to entirely separate paths (`dataset/` vs `dataset_3ch/`,
+`runs/fred_4channel/` vs `runs/fred_3channel/`), so you can build/train both
+without either overwriting the other — just re-run the same commands with
+`DRONE_CHANNELS` set differently.
 
 #### Scenario A — zips already in data_from_fred/ (most common)
 ```powershell
@@ -317,12 +328,12 @@ python common/make_catalog.py --auto-split --train 70 --val 20 --test 10 --shuff
 # → writes splits.yaml first, then scans all zips → writes catalog.yaml
 # (or edit splits.yaml manually, then run make_catalog.py with no flags)
 
-# Step 2 — generate 4-channel images (must write to disk — see note below):
+# Step 2 — generate images (must write to disk — see note below):
 python 4channel_project/build_dataset.py
 # → reads splits.yaml; for each sequence in train/val/test order:
 #     opens zip in-memory, parses events.raw sequentially (33ms windows, t=9.8s onward)
-#     computes 4 channels (pos/neg/rotor/time surface) per window
-#     writes dataset/images/s{seq}_{t_us}.png  (4-ch RGBA, new file, not in zip)
+#     computes N_CHANNELS channels (pos/neg[/rotor]/time surface) per window
+#     writes dataset/images/s{seq}_{t_us}.png  (RGBA if 4ch / RGB if 3ch, new file, not in zip)
 #            dataset/labels/s{seq}_{t_us}.txt  (YOLO bbox or empty)
 #     appends image path to train.txt / val.txt / test.txt
 # Note: unlike Pipeline 1/2, images MUST be generated and saved — they don't
@@ -334,6 +345,18 @@ $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python 4channel_project/train_4ch_yolo.py   # auto-resumes from last.pt
 
 # Step 4 — evaluate:
+python 4channel_project/evaluate.py
+```
+
+To build/train the 3-channel variant instead (drops the rotor channel),
+set `DRONE_CHANNELS=3` before each command — outputs go to `dataset_3ch/`
+and `runs/fred_3channel/`, so this is safe to run alongside the 4-channel
+steps above without conflict:
+```powershell
+$env:DRONE_CHANNELS="3"
+python 4channel_project/build_dataset.py
+$env:KMP_DUPLICATE_LIB_OK="TRUE"
+python 4channel_project/train_4ch_yolo.py
 python 4channel_project/evaluate.py
 ```
 
@@ -354,13 +377,15 @@ $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python 4channel_project/train_4ch_yolo.py
 python 4channel_project/evaluate.py
 ```
+Set `DRONE_CHANNELS=3` the same way as Scenario A for the 3-channel variant here too.
 
-Verify dataset split counts without regenerating:
+Verify dataset split counts without regenerating (also respects `DRONE_CHANNELS`
+— checks whichever dataset dir is currently selected):
 ```powershell
 python 4channel_project/build_dataset.py --check
 ```
 
-Single-sequence legacy mode (seq 7 only):
+Single-sequence legacy mode (seq 7 only, also respects `DRONE_CHANNELS`):
 ```powershell
 python 4channel_project/build_dataset.py --single
 ```
