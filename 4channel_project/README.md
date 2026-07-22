@@ -60,14 +60,31 @@ ai_drone/
 
 ## Setup
 
-```bash
-conda env create -f environment.yml
-conda activate drone_detect
+**One-command setup (recommended)** — creates `drone_detect` venv, auto-detects GPU:
+
+```powershell
+# Windows
+.\setup.ps1
+.\drone_detect\Scripts\Activate.ps1
 ```
 
-Or with pip:
 ```bash
+# WSL / Linux / Mac
+bash setup.sh
+source drone_detect/bin/activate
+```
+
+Or manually with pip:
+```bash
+# GPU (check your CUDA version with nvidia-smi first):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
+```
+
+Or with conda:
+```bash
+conda env create -f 4channel_project/environment.yml
+conda activate drone_detect
 ```
 
 Data is read directly from `.zip` files — no extraction needed.
@@ -75,11 +92,7 @@ Data is read directly from `.zip` files — no extraction needed.
 
 ### Windows — fix OpenMP conflict before training
 ```powershell
-# Per session:
 $env:KMP_DUPLICATE_LIB_OK="TRUE"
-
-# Or permanently for the conda env:
-conda env config vars set KMP_DUPLICATE_LIB_OK=TRUE -n drone_detect
 ```
 
 ## Here's the complete run order for all 3
