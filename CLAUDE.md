@@ -136,9 +136,12 @@ Each zip is used as a whole unit for one split — no per-frame random splitting
 
 **Auto-assign splits by percentage** (writes splits.yaml automatically):
 ```powershell
-python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10 --shuffle
 ```
 Sequences are sorted numerically and distributed by the given percentages (reproducible, no randomness).
+Add `--shuffle` to randomize which sequences land in which split instead of taking them in
+numeric order — still reproducible run-to-run (seeded with `config.RANDOM_SEED`). Omit it to
+keep the original deterministic numeric-order behavior.
 
 Generated 4-channel PNGs go into `4channel_project/dataset/images/` (flat folder).
 Split membership is recorded in `dataset/train.txt`, `val.txt`, `test.txt`.
@@ -222,7 +225,7 @@ Images are served **directly from zip at training time** — no PNG copying to d
 Only small label .txt files are written to disk.
 ```powershell
 # Step 1 — assign sequences to splits (shared with all pipelines):
-python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10 --shuffle
 
 # Step 2 — build index (writes labels to disk, images stay in zip):
 cd Fred
@@ -277,7 +280,7 @@ Useful flags: `--conf` (default 0.25), `--iou` (default 0.45), `--device` (overr
 cd c:\ai_drone
 
 # Step 1 — assign splits AND index in one command:
-python common/make_catalog.py --auto-split --train 70 --val 20 --test 10
+python common/make_catalog.py --auto-split --train 70 --val 20 --test 10 --shuffle
 # → writes splits.yaml first, then scans all zips → writes catalog.yaml
 # (or edit splits.yaml manually, then run make_catalog.py with no flags)
 

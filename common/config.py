@@ -26,6 +26,47 @@ DATA_FROM_FRED = os.path.normpath(os.path.join(_HERE, '..', 'data_from_fred'))
 SPLITS_YAML    = os.path.join(DATA_FROM_FRED, 'splits.yaml')
 CATALOG_YAML   = os.path.join(DATA_FROM_FRED, 'catalog.yaml')
 
+
+def _pick_default_sequence(data_dir, preferred='7'):
+    """
+    Choose which sequence single-sequence tools (config.py's SEQUENCE_DIR,
+    tools/*.py, pid_annotation_fft.py) default to.
+
+    - DRONE_SEQ env var forces a specific sequence number if set.
+    - Otherwise prefers `preferred` ("7", the sequence most docs/examples
+      reference) if its folder or zip is actually present in data_dir.
+    - Otherwise falls back to the lowest-numbered sequence found among
+      data_dir/*.zip and data_dir/<N>/ folders, so config.py doesn't
+      hard-crash with FileNotFoundError on a checkout that has other
+      sequences downloaded but not seq 7 specifically.
+    """
+    forced = os.environ.get('DRONE_SEQ', '').strip()
+    if forced:
+        return forced
+
+    def _available(seq):
+        return (os.path.isdir(os.path.join(data_dir, seq))
+                or os.path.isfile(os.path.join(data_dir, f"{seq}.zip")))
+
+    if _available(preferred):
+        return preferred
+
+    if os.path.isdir(data_dir):
+        found = set()
+        for name in os.listdir(data_dir):
+            stem = name[:-4] if name.endswith('.zip') else name
+            if stem.isdigit():
+                found.add(int(stem))
+        if found:
+            fallback = str(min(found))
+            print(f"[config] Sequence {preferred} not found in {data_dir} — "
+                  f"defaulting to sequence {fallback} instead "
+                  f"(override with DRONE_SEQ=<n>)")
+            return fallback
+
+    return preferred   # nothing found either way — keep old behavior, let
+                        # init_sequence() raise its normal FileNotFoundError
+
 # ── Torch — optional at config load time ─────────────────────────────────────
 
 try:
@@ -72,27 +113,28 @@ print(f"[config] GPU: {GPU_NAME}")
 
 if ENV == 'colab':
     # Google Colab — data on Drive, outputs on fast local SSD
-    DRIVE_ROOT   = "/content/drive/MyDrive/ai_drone"
-    SEQUENCE_DIR = os.path.join(DRIVE_ROOT, "data_from_fred", "7")
-    DATASET_DIR  = "/content/dataset"        # fast SSD — survives session
-    RUNS_DIR     = "/content/runs"
+    DRIVE_ROOT     = "/content/drive/MyDrive/ai_drone"
+    _COLAB_SEQ_DIR = os.path.join(DRIVE_ROOT, "data_from_fred")
+    SEQUENCE_DIR   = os.path.join(_COLAB_SEQ_DIR, _pick_default_sequence(_COLAB_SEQ_DIR))
+    DATASET_DIR    = "/content/dataset"        # fast SSD — survives session
+    RUNS_DIR       = "/content/runs"
 
 elif ENV == 'nvidia':
     # NVIDIA GPU server — adjust DATA_ROOT to your server's data path
     DATA_ROOT    = os.environ.get('DRONE_DATA', '/data/fred')
-    SEQUENCE_DIR = os.path.join(DATA_ROOT, "7")
+    SEQUENCE_DIR = os.path.join(DATA_ROOT, _pick_default_sequence(DATA_ROOT))
     DATASET_DIR  = os.path.join(DATA_ROOT, "dataset")
     RUNS_DIR     = os.path.join(DATA_ROOT, "runs")
 
 elif ENV == 'cpu':
     # CPU only — same paths as local but slower settings applied below
-    SEQUENCE_DIR = os.path.join(_HERE, '..', 'data_from_fred', '7')
+    SEQUENCE_DIR = os.path.join(DATA_FROM_FRED, _pick_default_sequence(DATA_FROM_FRED))
     DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
     RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
 
 else:
     # Local PC — Windows VS Code
-    SEQUENCE_DIR = os.path.join(_HERE, '..', 'data_from_fred', '7')
+    SEQUENCE_DIR = os.path.join(DATA_FROM_FRED, _pick_default_sequence(DATA_FROM_FRED))
     DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
     RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
 
@@ -157,7 +199,7 @@ DEBUG_SAMPLES = int(os.getenv('DEBUG_SAMPLES', '10'))
 
 YOLO_MODEL = "yolo11n.pt"
 IMG_SIZE   = 640
-PATIENCE   = 20
+PATIENCE   = 200
 N_CHANNELS = 4
 CACHE      = 'disk'   # cache decoded images to disk (.npy) — avoids re-decoding
                       # all ~97k 4-channel PNGs from scratch every epoch

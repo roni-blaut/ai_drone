@@ -16,3 +16,5 @@ runs/
 =======
 FRED/**
 >>>>>>> c3928dc (update gitignore and notebook)
+
+/yolo*

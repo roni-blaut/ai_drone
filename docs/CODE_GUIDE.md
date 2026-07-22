@@ -162,12 +162,30 @@ Checks in this order:
 
 Sets paths and training parameters accordingly:
 
-| ENV | SEQUENCE_DIR | BATCH | DEVICE |
+| ENV | SEQUENCE_DIR (default) | BATCH | DEVICE |
 |---|---|---|---|
 | local | ../data_from_fred/7 | 8 | GPU or CPU |
 | colab | /content/drive/MyDrive/ai_drone/data_from_fred/7 | 16 | 0 (T4) |
 | nvidia | /data/fred/7 | 32 | 0 |
 | cpu | ../data_from_fred/7 | 4 | cpu |
+
+### Function: `_pick_default_sequence(data_dir, preferred='7')`
+
+`SEQUENCE_DIR` (the single sequence that `config.py`'s derived paths —
+`RAW_FILE`, `COORDS_FILE`, `FRAMES_DIR`, etc. — and single-sequence tools
+under `tools/` point at) used to hardcode sequence `7` in all four `ENV`
+branches, which crashed `config.py` on import (breaking every script that
+imports it) on any checkout that has other sequences downloaded but not
+sequence 7 specifically. `_pick_default_sequence()` fixes this:
+- `DRONE_SEQ` environment variable forces a specific sequence number if set
+  (mirrors the existing `DRONE_ENV` override pattern).
+- Otherwise prefers `"7"` if its folder or `.zip` is actually present in the
+  relevant data directory (`DATA_FROM_FRED` for local/cpu, `DATA_ROOT` for
+  nvidia, the Drive-mounted `data_from_fred` for colab) — same default
+  behavior as before for the common case.
+- Otherwise scans that directory for any `<N>.zip` or `<N>/` sequence and
+  falls back to the lowest-numbered one found, printing which sequence it
+  picked instead of 7.
 
 ### Key parameters
 
@@ -640,13 +658,18 @@ folder that holds the FRED sequence zips.
 On re-run, existing `description` and `drive_file_id` fields are **preserved** — only
 auto-generated fields are updated. Edit these manually in `catalog.yaml` as needed.
 
-### Function: `auto_split(train_pct, val_pct, test_pct)`
+### Function: `auto_split(train_pct, val_pct, test_pct, shuffle=False)`
 
 Auto-assigns all local `.zip` sequences to train/val/test by percentage.
-Sequences are sorted numerically (reproducible). Writes `data_from_fred/splits.yaml`.
+By default sequences are sorted numerically before slicing (reproducible, no
+randomness). With `shuffle=True` (`--shuffle` on the CLI), sequences are
+randomly shuffled first — seeded with `config.RANDOM_SEED`, so still
+reproducible run-to-run — then each resulting split is sorted again for a
+readable `splits.yaml`. Writes `data_from_fred/splits.yaml`.
 
 ```powershell
 python make_catalog.py --auto-split --train 70 --val 20 --test 10
+python make_catalog.py --auto-split --train 70 --val 20 --test 10 --shuffle
 ```
 
 ### Function: `update_drive_ids(folder_id)`
@@ -667,6 +690,7 @@ python make_catalog.py --scan-drive --api-key AIza...   # reliable API key metho
 | `--train N` | 70 | train % for --auto-split |
 | `--val N` | 20 | val % for --auto-split |
 | `--test N` | 10 | test % for --auto-split |
+| `--shuffle` | off | randomize sequence order before splitting (seeded, still reproducible) instead of numeric order |
 | `--scan-drive` | off | scan Drive folder, add drive_file_id to catalog |
 | `--download-all` | off | download all zips from Drive (no API key, uses gdown) |
 | `--folder-id ID` | DRIVE_FOLDER_ID | override Drive folder ID |
@@ -1013,6 +1037,7 @@ runs/fred_4channel/
 | Zip with wrapped folder structure | `KeyError: "There is no item named 'coordinates.txt' in the archive"` | `ZipSequence` auto-detects a wrapping top-level folder (`_detect_root_prefix()`) and strips it — no action needed, fixed in `zip_utils.py` |
 | DataLoader workers see unpatched imread | `RuntimeError: ... expected input[N, 4, ...] ... got 3 channels` during training/eval | Call `patch_ultralytics_rgba_imread()` at module level (not inside a function only reachable from `if __name__=='__main__':`) — Windows `spawn` workers re-import the script but skip the guarded block |
 | Stale/incompatible checkpoint reused | `RuntimeError` channel mismatch in training or `evaluate.py` (e.g. `expected ... to have 4 channels, but got 3`, or the reverse) | Checkpoint resume now checks channel count via `_first_conv_in_channels()`; incompatible checkpoints are ignored with a warning (train, falls back to a fresh patched model) or rejected with a clear message (evaluate, before calling `model.val()`) instead of crashing |
+| Sequence 7 not downloaded locally | `FileNotFoundError: Sequence folder not found ... Zip file not found ...` on any `import config` | `SEQUENCE_DIR` now picks a default via `_pick_default_sequence()` — prefers seq 7 if present, otherwise auto-falls-back to the lowest-numbered sequence actually found in `data_from_fred/`. Force a specific one with `DRONE_SEQ=<n>` |
 
 ---
 
