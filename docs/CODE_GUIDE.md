@@ -196,10 +196,10 @@ sequence 7 specifically. `_pick_default_sequence()` fixes this:
 | `REFRACTORY_US` | 1000 | 1ms refractory period per pixel |
 | `BAF_RADIUS_PX` | 3 | BAF neighbourhood radius in pixels |
 | `BAF_DELTA_US` | 10000 | 10ms BAF time window |
-| `N_CHANNELS` | 4 | Number of input channels to YOLO |
+| `N_CHANNELS` | 4 | Number of input channels to YOLO — 3 or 4, set via `DRONE_CHANNELS` env var (drops the rotor-map channel when 3). `DATASET_DIR` and `RUN_NAME` are suffixed by this value so 3ch/4ch outputs never collide |
 | `BATCH` | 8 | Training batch size |
 | `EPOCHS` | 100 | Training epochs |
-| `CACHE` | `'disk'` | Ultralytics image cache mode — decode each PNG once (`.npy` next to the source image) and reuse across epochs instead of re-decoding all ~97k 4-channel images every epoch. `'disk'` chosen over `'ram'` because the estimated full cache size (~108GB for train+val) is too close to this machine's available RAM (~103GB) to risk safely |
+| `CACHE` | `'disk'` | Ultralytics image cache mode — decode each PNG once (`.npy` next to the source image) and reuse across epochs instead of re-decoding all ~97k images (the 4-channel dataset's size at time of writing) every epoch. `'disk'` chosen over `'ram'` because the estimated full cache size (~108GB for train+val) is too close to this machine's available RAM (~103GB) to risk safely |
 
 ---
 
@@ -400,25 +400,32 @@ Use this in `build_dataset.py` where speed matters more than filter quality.
 
 ## channels.py
 
-**Purpose:** Convert a filtered event array into 4 physics-based input channels.
+**Purpose:** Convert a filtered event array into the configured physics-based
+input channels — 3 or 4, per `config.N_CHANNELS` (`DRONE_CHANNELS` env var,
+default `4`).
 
 ### Function: `generate_channels(events, t_start_us, t_end_us)`
 
-Main entry point. Calls all 4 channel generators and stacks the result.
+Main entry point. Calls the channel generators needed for the current
+`N_CHANNELS` and stacks the result.
 
 ```python
 channels = generate_channels(events, t_start, t_end)
-# channels.shape == (4, 720, 1280)  dtype float32
+# channels.shape == (config.N_CHANNELS, 720, 1280)  dtype float32  (3 or 4)
 # Each channel normalized to [0, 1]
 ```
 
-Internally calls:
+Always calls:
 1. `_channel_positive_polarity(events)`
 2. `_channel_negative_polarity(events)`
-3. `_channel_rotor_map(events)`
 4. `_channel_time_surface(events, t_start_us, t_end_us)`
 
-Then stacks with `np.stack([ch1, ch2, ch3, ch4], axis=0)`.
+Only when `N_CHANNELS == 4`, also calls:
+3. `_channel_rotor_map(events)`
+
+Stacking order is `[ch1, ch2, ch3, ch_time]` for 4 channels (unchanged from
+before — backward compatible with anything already trained), or
+`[ch1, ch2, ch_time]` for 3 channels when the rotor map is skipped.
 
 ### Function: `_channel_positive_polarity(events)`
 
@@ -445,7 +452,7 @@ Together channels 1 and 2 give YOLO direction of motion without any optical flow
 
 ### Function: `_channel_rotor_map(events, threshold=5)`
 
-**Channel 3 — Spinning motor signature**
+**Channel 3 — Spinning motor signature (only computed when `N_CHANNELS == 4`)**
 
 Counts ALL events per pixel (both polarities), then zeros out any pixel below `threshold`.
 
@@ -493,10 +500,15 @@ Returns zeros if frame is empty (no events).
 
 ### Function: `channels_to_rgb_preview(channels)`
 
-Creates a 2×2 grid preview image for debugging:
+Layout depends on `channels.shape[0]` (works regardless of the current
+`config.N_CHANNELS`). 4 channels — 2×2 grid:
 ```
 [Ch1 positive | Ch2 negative]
 [Ch3 rotor    | Ch4 surface ]
+```
+3 channels — 1×3 horizontal strip:
+```
+[Ch1 positive | Ch2 negative | Ch3 surface]
 ```
 Returns BGR image for OpenCV display/save.
 
@@ -510,7 +522,7 @@ Returns BGR image for OpenCV display/save.
 
 ```
 dataset/
-├── images/       ← all 4-channel RGBA PNGs, flat (no train/val subdirs)
+├── images/       ← all PNGs, flat (no train/val subdirs) — RGBA (4-channel) or RGB (3-channel, DRONE_CHANNELS=3)
 │   ├── s4_000009800000.png
 │   ├── s7_000009800000.png   (same timestamp, different seq → no collision)
 │   └── …
@@ -519,7 +531,7 @@ dataset/
 ├── train.txt     ← absolute paths of train images (whole sequences per splits.yaml)
 ├── val.txt       ← absolute paths of val images
 ├── test.txt      ← absolute paths of test images (may be empty)
-└── dataset.yaml  ← channels: 4, references train.txt / val.txt / test.txt
+└── dataset.yaml  ← channels: 3 or 4 (N_CHANNELS), references train.txt / val.txt / test.txt
 ```
 
 Frame naming: `s{seq_num}_{t_us:012d}.png` — globally unique across all sequences.
@@ -583,7 +595,7 @@ path:  /absolute/path/to/dataset
 train: train.txt
 val:   val.txt
 test:  test.txt
-channels: 4
+channels: 4      # or 3 — matches config.N_CHANNELS at build time
 nc: 1
 names: ['drone']
 ```
@@ -772,9 +784,10 @@ detect a stale/incompatible checkpoint before feeding it 4-channel data.
 Safety patch — modifies the first `Conv2d` layer to accept `n_channels` inputs
 if it hasn't already been set by Ultralytics from `dataset.yaml`.
 
-In normal operation (`channels: 4` in yaml), Ultralytics sets this automatically
-and the function detects `old_in == n_channels` and skips. The patch runs only
-when loading a model that was not originally built with 4-channel input.
+In normal operation (`channels: 3` or `channels: 4` in yaml, matching
+`N_CHANNELS`), Ultralytics sets this automatically and the function detects
+`old_in == n_channels` and skips. The patch runs only when loading a model
+that was not originally built with that many input channels.
 
 ```python
 # Old first layer (standard YOLO):
@@ -797,7 +810,9 @@ Module-level function, **called unconditionally at import time** (not inside
 `train_with_ultralytics()`). Monkeypatches `ultralytics.utils.patches.imread`
 and `ultralytics.data.base.imread` to force `cv2.IMREAD_UNCHANGED`, since
 Ultralytics' native `imread` uses `cv2.IMREAD_COLOR` for any `channels != 1`
-and silently drops the alpha channel on our 4-channel RGBA PNGs.
+and silently drops the alpha channel on our 4-channel RGBA PNGs. Harmless
+no-op for the 3-channel RGB variant (`DRONE_CHANNELS=3`) — no alpha channel
+exists there to strip either way.
 
 Must live at module scope: on Windows, `model.train()`'s DataLoader workers
 (`workers=8` by default) are spawned subprocesses that re-import this script
@@ -1026,7 +1041,7 @@ runs/fred_4channel/
 |---|---|---|
 | OpenMP DLL conflict | `OMP: Error #15` on Windows | `$env:KMP_DUPLICATE_LIB_OK="TRUE"` |
 | Old .npy dataset | `No images found` error | Delete `dataset/` folder and rerun `build_dataset.py` |
-| Wrong channel count | Layer 0 shows `[3, 16, 3, 2]` | Ensure `channels: 4` in `dataset.yaml` and no old checkpoint loaded |
+| Wrong channel count | Layer 0 shows unexpected in_channels | Ensure `dataset.yaml`'s `channels:` matches `DRONE_CHANNELS`/`N_CHANNELS`, and no checkpoint from a different channel count is loaded (`DATASET_DIR`/`RUN_NAME` are channel-suffixed specifically to prevent this) |
 | fbgemm.dll error | PyTorch DLL load failure | Install Visual C++ Redistributable from aka.ms/vs/17/release/vc_redist.x64.exe |
 | Old train/val subdir layout | `train.txt` not found | Delete `dataset/` and rebuild with `python build_dataset.py` |
 | Sequence not found | `FileNotFoundError: Zip file not found` | Add `N.zip` to `data_from_fred/` or update `splits.yaml` |

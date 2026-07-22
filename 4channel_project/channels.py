@@ -1,5 +1,5 @@
 """
-channels.py — Generate the 4 physics-based input channels from filtered events.
+channels.py — Generate the physics-based input channels from filtered events.
 
 Channel 1 — Positive polarity (leading edge)
     Events where brightness INCREASED.
@@ -11,37 +11,41 @@ Channel 2 — Negative polarity (trailing edge)
     Shows where the drone just WAS.
     Physically: the wake of the drone.
 
-Channel 3 — Rotor frequency map
+Channel 3 — Rotor frequency map (only when N_CHANNELS == 4)
     Pixels that fired more than ROTOR_THRESHOLD times in the window.
     These are rotor blade crossings — the spinning motor signature.
     Nothing in nature produces this except spinning machinery.
+    Skipped entirely when config.N_CHANNELS == 3 (DRONE_CHANNELS=3) — the
+    3-channel variant is [positive, negative, time surface].
 
-Channel 4 — Time surface
+Channel 4 (or 3, if rotor is skipped) — Time surface
     Most recent event timestamp per pixel, normalized 0→1.
     Recent = bright (1.0). Old = dark (0.0). No event = 0.
     Shows WHERE the action is happening RIGHT NOW.
 
-Output: numpy array of shape (4, IMG_H, IMG_W) dtype float32
+Output: numpy array of shape (N_CHANNELS, IMG_H, IMG_W) dtype float32
         Each channel independently normalized to [0, 1].
 
 Usage:
     from channels import generate_channels
     ch = generate_channels(events, t_start_us, t_end_us)
-    # ch.shape == (4, 720, 1280)
+    # ch.shape == (config.N_CHANNELS, 720, 1280)  — 3 or 4 depending on
+    # DRONE_CHANNELS
 """
 
 import os
 import sys
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'common'))
-from config import IMG_W, IMG_H, ROTOR_THRESHOLD, DEBUG_MODE, DEBUG_SAMPLES
+from config import IMG_W, IMG_H, ROTOR_THRESHOLD, N_CHANNELS, DEBUG_MODE, DEBUG_SAMPLES
 
 _generate_debug_count = 0
 
 
 def generate_channels(events, t_start_us, t_end_us):
     """
-    Generate all 4 channels from a filtered event array.
+    Generate the configured channels (3 or 4, per config.N_CHANNELS) from a
+    filtered event array.
 
     Parameters
     ----------
@@ -51,24 +55,28 @@ def generate_channels(events, t_start_us, t_end_us):
 
     Returns
     -------
-    numpy float32 array of shape (4, IMG_H, IMG_W)
+    numpy float32 array of shape (N_CHANNELS, IMG_H, IMG_W)
     Values normalized to [0, 1] per channel.
     """
     # Filter to this window
     mask = (events['t'] >= t_start_us) & (events['t'] < t_end_us)
     evs  = events[mask]
 
-    ch1 = _channel_positive_polarity(evs)
-    ch2 = _channel_negative_polarity(evs)
-    ch3 = _channel_rotor_map(evs)
-    ch4 = _channel_time_surface(evs, t_start_us, t_end_us)
+    ch1     = _channel_positive_polarity(evs)
+    ch2     = _channel_negative_polarity(evs)
+    ch_time = _channel_time_surface(evs, t_start_us, t_end_us)
 
-    # Stack into (4, H, W)
-    stack = np.stack([ch1, ch2, ch3, ch4], axis=0).astype(np.float32)
+    if N_CHANNELS == 4:
+        ch3   = _channel_rotor_map(evs)
+        layers, names = [ch1, ch2, ch3, ch_time], ["Positive", "Negative", "Rotor   ", "TimeSurf"]
+    else:
+        layers, names = [ch1, ch2, ch_time], ["Positive", "Negative", "TimeSurf"]
+
+    # Stack into (N_CHANNELS, H, W)
+    stack = np.stack(layers, axis=0).astype(np.float32)
 
     global _generate_debug_count
     if DEBUG_MODE and _generate_debug_count < DEBUG_SAMPLES:
-        names = ["Positive", "Negative", "Rotor   ", "TimeSurf"]
         print(f"  [DEBUG] Channels from {len(evs):,} events "
               f"(window #{_generate_debug_count + 1}):")
         for i, name in enumerate(names):
@@ -216,39 +224,45 @@ def _normalize(frame):
 
 def channels_to_rgb_preview(channels):
     """
-    Create an RGB preview image from 4 channels for debugging.
+    Create an RGB preview image from the channel stack for debugging.
 
-    Layout: 2x2 grid
-      [Ch1 positive | Ch2 negative]
-      [Ch3 rotor    | Ch4 surface ]
+    Layout depends on channels.shape[0] (works for either 3 or 4 channels,
+    regardless of the current config.N_CHANNELS):
+      4 channels — 2x2 grid: [Ch1 positive | Ch2 negative]
+                              [Ch3 rotor    | Ch4 surface ]
+      3 channels — 1x3 horizontal strip: [Ch1 positive | Ch2 negative | Ch3 surface]
 
-    Returns numpy uint8 array of shape (IMG_H*2, IMG_W*2, 3)
+    Returns numpy uint8 array of shape (IMG_H*rows, IMG_W*cols, 3)
     """
     import cv2
 
     def to_uint8(ch):
         return (ch * 255).astype(np.uint8)
 
-    ch1 = to_uint8(channels[0])
-    ch2 = to_uint8(channels[1])
-    ch3 = to_uint8(channels[2])
-    ch4 = to_uint8(channels[3])
+    n = channels.shape[0]
+    h, w = IMG_H, IMG_W
 
-    top    = np.hstack([ch1, ch2])
-    bottom = np.hstack([ch3, ch4])
-    grid   = np.vstack([top, bottom])
+    if n == 4:
+        ch1, ch2, ch3, ch4 = (to_uint8(channels[i]) for i in range(4))
+        grid = np.vstack([np.hstack([ch1, ch2]), np.hstack([ch3, ch4])])
+        labels = [
+            ((10, 30),    "Ch1: Positive polarity (leading edge)"),
+            ((w+10, 30),  "Ch2: Negative polarity (trailing edge)"),
+            ((10, h+30),  "Ch3: Rotor frequency map"),
+            ((w+10, h+30),"Ch4: Time surface"),
+        ]
+    else:
+        ch1, ch2, ch3 = (to_uint8(channels[i]) for i in range(3))
+        grid = np.hstack([ch1, ch2, ch3])
+        labels = [
+            ((10, 30),      "Ch1: Positive polarity (leading edge)"),
+            ((w+10, 30),    "Ch2: Negative polarity (trailing edge)"),
+            ((2*w+10, 30),  "Ch3: Time surface"),
+        ]
 
     # Convert to BGR for OpenCV display
     grid_bgr = cv2.cvtColor(grid, cv2.COLOR_GRAY2BGR)
 
-    # Add labels
-    h, w = IMG_H, IMG_W
-    labels = [
-        ((10, 30),  "Ch1: Positive polarity (leading edge)"),
-        ((w+10, 30), "Ch2: Negative polarity (trailing edge)"),
-        ((10, h+30), "Ch3: Rotor frequency map"),
-        ((w+10, h+30), "Ch4: Time surface"),
-    ]
     for (x, y), text in labels:
         cv2.putText(grid_bgr, text, (x, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
@@ -279,10 +293,12 @@ if __name__ == "__main__":
     events = fast_filter(events)
     print(f"  After filter: {len(events):,}")
 
-    print("\nGenerating 4 channels...")
+    print(f"\nGenerating {N_CHANNELS} channels...")
     channels = generate_channels(events, T_START, T_END)
     print(f"  Output shape: {channels.shape}")
-    for i, name in enumerate(["Positive", "Negative", "Rotor", "TimeSurface"]):
+    _names = ["Positive", "Negative", "Rotor", "TimeSurface"] if N_CHANNELS == 4 \
+        else ["Positive", "Negative", "TimeSurface"]
+    for i, name in enumerate(_names):
         ch = channels[i]
         n_nonzero = (ch > 0).sum()
         print(f"  Ch{i+1} {name:12s}: max={ch.max():.3f}  "

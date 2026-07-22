@@ -1,14 +1,16 @@
 """
-train_4ch_yolo.py — Train YOLO v11 with 4-channel event camera input.
+train_4ch_yolo.py — Train YOLO v11 with physics-channel event camera input.
 
 Key modification vs standard YOLO:
-  The first Conv2d layer is changed from in_channels=3 (RGB)
-  to in_channels=4 (our physics channels).
+  The first Conv2d layer is changed from in_channels=3 (RGB) to
+  in_channels=N_CHANNELS (our physics channels — 3 or 4, see
+  common/config.py's DRONE_CHANNELS / 4channel_project/channels.py).
 
   Everything else — backbone, neck, head, loss, anchors — unchanged.
 
 Usage:
     python train_4ch_yolo.py
+    DRONE_CHANNELS=3 python train_4ch_yolo.py   # drop the rotor channel
 """
 
 import os
@@ -35,13 +37,17 @@ from ultralytics import YOLO
 
 def patch_ultralytics_rgba_imread():
     """
-    Force Ultralytics to read RGBA PNGs with all 4 channels intact.
+    Force Ultralytics to read our dataset PNGs with all channels intact.
 
     Ultralytics' own imread (ultralytics.utils.patches.imread) uses
     cv2.IMREAD_COLOR for any channels != 1 (ultralytics/data/base.py sets
     cv2_flag=IMREAD_COLOR), which silently drops the alpha channel on our
-    4-channel RGBA PNGs. Patch both the source function and base.py's
-    already-imported local binding to force cv2.IMREAD_UNCHANGED instead.
+    4-channel RGBA PNGs (DRONE_CHANNELS=4). Patch both the source function
+    and base.py's already-imported local binding to force
+    cv2.IMREAD_UNCHANGED instead. This is also safe/correct — a no-op in
+    effect — for the 3-channel RGB PNGs used when DRONE_CHANNELS=3: those
+    have no alpha channel to begin with, so IMREAD_UNCHANGED decodes them
+    identically to IMREAD_COLOR.
 
     Must run at MODULE level (not inside train_with_ultralytics()) and be
     called unconditionally on import. On Windows, DataLoader workers

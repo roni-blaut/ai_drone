@@ -154,9 +154,19 @@ Frame naming: `s{seq_num}_{t_start_us:012d}.png` — globally unique across sequ
 ## Dataset format
 
 - Pipeline 1 & 2: standard 3-channel PNG/JPG, `channels: 3` in dataset.yaml
-- Pipeline 3: **4-channel RGBA PNG**, `channels: 4` in dataset.yaml
-  - Ultralytics reads `channels: 4` and adjusts first Conv2d automatically
-  - imread patch in train_4ch_yolo.py forces `cv2.IMREAD_UNCHANGED` to preserve alpha
+- Pipeline 3: **3 or 4 physics channels**, selected via `DRONE_CHANNELS` (default `4`):
+  - `DRONE_CHANNELS=4` (default) — positive polarity, negative polarity, rotor map, time
+    surface. Saved as **4-channel RGBA PNG**, `channels: 4` in dataset.yaml.
+  - `DRONE_CHANNELS=3` — drops the rotor-frequency channel (positive polarity, negative
+    polarity, time surface only). Saved as **3-channel RGB PNG**, `channels: 3` in
+    dataset.yaml.
+  - Ultralytics reads the `channels:` value and adjusts first Conv2d automatically
+  - imread patch in train_4ch_yolo.py forces `cv2.IMREAD_UNCHANGED` — needed to preserve
+    alpha for the 4-channel case; harmless no-op for 3-channel (no alpha channel exists)
+  - Both variants are fully independent on disk — `common/config.py` suffixes
+    `DATASET_DIR` (`4channel_project/dataset` vs `dataset_3ch`) and `RUN_NAME`
+    (`fred_4channel` vs `fred_3channel`) by channel count, so building/training one
+    never overwrites the other. Example: `DRONE_CHANNELS=3 python 4channel_project/build_dataset.py`
 
 ## Intel Arc GPU support (Windows)
 

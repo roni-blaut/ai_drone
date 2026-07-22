@@ -67,6 +67,19 @@ def _pick_default_sequence(data_dir, preferred='7'):
     return preferred   # nothing found either way — keep old behavior, let
                         # init_sequence() raise its normal FileNotFoundError
 
+
+# ── Channel configuration (3 or 4) ────────────────────────────────────────────
+# DRONE_CHANNELS=3 drops the rotor-frequency channel — output becomes
+# [positive polarity, negative polarity, time surface] instead of the full
+# [positive, negative, rotor map, time surface]. Both variants are fully
+# supported side by side (see channels.py) — DATASET_DIR and RUN_NAME below
+# are suffixed by channel count so a 3ch and 4ch dataset/run never collide.
+
+N_CHANNELS = int(os.environ.get('DRONE_CHANNELS', '4'))
+if N_CHANNELS not in (3, 4):
+    raise ValueError(f"DRONE_CHANNELS must be 3 or 4 (got {N_CHANNELS}) — "
+                      f"see channels.py for what each combination means")
+
 # ── Torch — optional at config load time ─────────────────────────────────────
 
 try:
@@ -111,31 +124,37 @@ print(f"[config] GPU: {GPU_NAME}")
 
 # ── Paths — per environment ───────────────────────────────────────────────────
 
+# Suffix the dataset folder by channel count so a 3-channel and 4-channel
+# dataset can exist side by side without one overwriting the other. The
+# 4-channel path is unchanged ("dataset") to avoid disrupting anything
+# already generated there.
+_dataset_subdir = 'dataset' if N_CHANNELS == 4 else f'dataset_{N_CHANNELS}ch'
+
 if ENV == 'colab':
     # Google Colab — data on Drive, outputs on fast local SSD
     DRIVE_ROOT     = "/content/drive/MyDrive/ai_drone"
     _COLAB_SEQ_DIR = os.path.join(DRIVE_ROOT, "data_from_fred")
     SEQUENCE_DIR   = os.path.join(_COLAB_SEQ_DIR, _pick_default_sequence(_COLAB_SEQ_DIR))
-    DATASET_DIR    = "/content/dataset"        # fast SSD — survives session
+    DATASET_DIR    = f"/content/{_dataset_subdir}"   # fast SSD — survives session
     RUNS_DIR       = "/content/runs"
 
 elif ENV == 'nvidia':
     # NVIDIA GPU server — adjust DATA_ROOT to your server's data path
     DATA_ROOT    = os.environ.get('DRONE_DATA', '/data/fred')
     SEQUENCE_DIR = os.path.join(DATA_ROOT, _pick_default_sequence(DATA_ROOT))
-    DATASET_DIR  = os.path.join(DATA_ROOT, "dataset")
+    DATASET_DIR  = os.path.join(DATA_ROOT, _dataset_subdir)
     RUNS_DIR     = os.path.join(DATA_ROOT, "runs")
 
 elif ENV == 'cpu':
     # CPU only — same paths as local but slower settings applied below
     SEQUENCE_DIR = os.path.join(DATA_FROM_FRED, _pick_default_sequence(DATA_FROM_FRED))
-    DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
+    DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', _dataset_subdir)
     RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
 
 else:
     # Local PC — Windows VS Code
     SEQUENCE_DIR = os.path.join(DATA_FROM_FRED, _pick_default_sequence(DATA_FROM_FRED))
-    DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', 'dataset')
+    DATASET_DIR  = os.path.join(_HERE, '..', '4channel_project', _dataset_subdir)
     RUNS_DIR     = os.path.join(_HERE, '..', '4channel_project', 'runs')
 
 # Initialise zip or real-folder access for SEQUENCE_DIR
@@ -161,7 +180,7 @@ RGB_DIR        = os.path.join(SEQUENCE_DIR, "RGB")
 PADDED_RGB_DIR = os.path.join(SEQUENCE_DIR, "PADDED_RGB")
 RGB_YOLO_DIR   = os.path.join(SEQUENCE_DIR, "RGB_YOLO")
 
-RUN_NAME    = "fred_4channel"
+RUN_NAME    = 'fred_4channel' if N_CHANNELS == 4 else f'fred_{N_CHANNELS}channel'
 
 # ── Sensor ────────────────────────────────────────────────────────────────────
 
@@ -200,9 +219,9 @@ DEBUG_SAMPLES = int(os.getenv('DEBUG_SAMPLES', '10'))
 YOLO_MODEL = "yolo11n.pt"
 IMG_SIZE   = 640
 PATIENCE   = 200
-N_CHANNELS = 4
+# N_CHANNELS is set earlier (near DRONE_CHANNELS handling), before DATASET_DIR/RUN_NAME
 CACHE      = 'disk'   # cache decoded images to disk (.npy) — avoids re-decoding
-                      # all ~97k 4-channel PNGs from scratch every epoch
+                      # all ~97k images from scratch every epoch
 
 if ENV == 'colab':
     # Colab T4 — 15GB VRAM
@@ -233,6 +252,7 @@ else:
 
 print(f"[config] Sequence dir : {SEQUENCE_DIR}")
 print(f"[config] Dataset dir  : {DATASET_DIR}")
+print(f"[config] Channels     : {N_CHANNELS}")
 print(f"[config] Device       : {DEVICE}")
 print(f"[config] Batch size   : {BATCH}")
 print(f"[config] Epochs       : {EPOCHS}")
