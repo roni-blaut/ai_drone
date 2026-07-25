@@ -917,6 +917,57 @@ Output saved to `./predictions/` folder.
 
 ---
 
+## infer.py
+
+**Purpose:** Run a trained model against any sequence zip — not just ones in
+`splits.yaml` — and show the prediction side by side with that sequence's RGB
+video. Unlike `evaluate.py`'s `visualize_predictions()` (which reads
+already-built dataset val images), this generates channels from `events.raw`
+directly in memory, so it works on a genuinely new/unseen zip with no prior
+`build_dataset.py` run needed.
+
+### Channel-count guard
+
+Loads the model and checks its actual input channel count via
+`_first_conv_in_channels()` (imported from `train_4ch_yolo.py`) against the
+current `config.N_CHANNELS`. These must match — `N_CHANNELS` determines how
+many channels `generate_channels()` produces from `events.raw`, and it has to
+agree with what the loaded weights expect. On mismatch, prints which
+`DRONE_CHANNELS` value to set instead of letting the model crash.
+
+### Main loop
+
+For each `WINDOW_US` window from `EVT3Reader.iter_windows()`:
+1. `fast_filter()` → `generate_channels()` → uint8 `(H, W, N_CHANNELS)` array
+   — identical construction to how `build_dataset.py` saves training PNGs.
+2. `model.predict(source=that_array, ...)` — Ultralytics accepts a raw numpy
+   array directly; no image file is ever written.
+3. Left panel: `event_view_bgr()` colorizes channel 0 (positive polarity) into
+   green and channel 1 (negative polarity) into red.
+4. Right panel: nearest `PADDED_RGB/` frame by synced timestamp
+   (`nearest_rgb()`, same "nearest neighbor by relative wall-clock time"
+   approach as `tools/raw_to_movie.py`/`tools/sync_check.py`).
+5. Both panels get the same predicted box(es) (yellow) and, if
+   `coordinates.txt` exists for the zip, the same ground-truth box (cyan) via
+   `find_annotation()` — reused directly from `build_dataset.py` rather than
+   re-implemented.
+
+### CLI flags
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--zip` | *(required)* | Any sequence zip, anywhere on disk |
+| `--weights` | `RUNS_DIR/RUN_NAME/weights/best.pt` | Model weights — default follows current `DRONE_CHANNELS` |
+| `--conf` / `--iou` | 0.25 / 0.45 | Detection thresholds |
+| `--device` | `config.DEVICE` | Override auto-detected device |
+| `--start` / `--end` | 9.8 / end of file | Synced-time range (seconds) |
+| `--save` | `runs/infer/<zip_stem>_<N>ch.mp4` | Output video path |
+| `--save-frames DIR` | off | Also save per-frame PNGs |
+| `--show` | off | Live cv2 preview (SPACE=pause, Q/ESC=quit) |
+| `--no-video` | off | Skip writing the `.mp4` |
+
+---
+
 ## colab_run.ipynb
 
 **Purpose:** Google Colab notebook — runs the entire pipeline from Drive mount to final evaluation in 10 cells.

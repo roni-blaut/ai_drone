@@ -309,6 +309,29 @@ Default weights: `Fred/runs/fred_baseline_{mode}/weights/best.pt` (override with
 Default output video: `Fred/runs/infer/<zip_stem>_<mode>.mp4`.
 Useful flags: `--conf` (default 0.25), `--iou` (default 0.45), `--device` (override auto-detect), `--no-video`.
 
+### Inference on a new/unseen sequence zip (4channel_project/infer.py)
+Same idea as `Fred/infer.py` above but for the physics-channel pipeline (Pipeline 3).
+Generates channels from `events.raw` in-memory per 33ms window (no PNGs written to
+disk), runs the trained model directly on that array, and shows the prediction side
+by side with the nearest `PADDED_RGB/` frame from the same zip. If `coordinates.txt`
+is present it overlays the ground-truth box too (best effort). The weights' channel
+count must match the current `DRONE_CHANNELS` — a clear error tells you which value
+to set if they don't, rather than crashing.
+```powershell
+DRONE_CHANNELS=3 python 4channel_project/infer.py --zip data_from_fred/50.zip
+python 4channel_project/infer.py --zip data_from_fred/50.zip --start 0 --end 20
+python 4channel_project/infer.py --zip C:\path\to\any_sequence.zip --show
+python 4channel_project/infer.py --zip data_from_fred/50.zip --save-frames out_frames
+```
+Default weights: `runs/{RUN_NAME}/weights/best.pt` (i.e. whatever `DRONE_CHANNELS`
+currently resolves to — override with `--weights`).
+Default output video: `4channel_project/runs/infer/<zip_stem>_<N>ch.mp4`.
+Left panel: colorized event view (green=positive polarity, red=negative polarity).
+Right panel: nearest `PADDED_RGB/` frame by synced timestamp. Yellow=prediction,
+cyan=ground truth (when available) — drawn on both panels for direct comparison.
+Useful flags: `--conf` (default 0.25), `--iou` (default 0.45), `--device` (default
+`config.DEVICE`), `--start`/`--end` (synced seconds, default 9.8s–end), `--no-video`.
+
 ### Pipeline 3 — physics channels (target: > 87.68% mAP50)
 
 **Channel count:** every command below defaults to `DRONE_CHANNELS=4` (all 4
