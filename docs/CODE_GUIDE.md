@@ -824,25 +824,61 @@ load unpatched 3-channel images while the (correctly 4-channel) model expects
 `evaluate.py` imports and calls this same function for its own `model.val()`
 call, rather than duplicating the patch.
 
-### Function: `train_with_ultralytics()`
+### Function: `train_with_ultralytics(init_from=None, run_name=None)`
 
 Uses Ultralytics YOLO API for training.
 
-1. Checks for `runs/fred_4channel/weights/last.pt` — if found, loads it and
+- `init_from` (optional): path to a `.pt` checkpoint to use as starting
+  weights instead of `YOLO_MODEL` (COCO `yolo11n.pt`) — see "Optional
+  cross-pipeline init" below. Only consulted on a fresh start; an existing
+  compatible `last.pt` checkpoint still takes priority (resume).
+- `run_name` (optional): overrides the output folder name. Defaults to
+  `RUN_NAME` (plain), or `f"{RUN_NAME}_from_fred"` when `init_from` is given
+  and no explicit `run_name` is passed — this keeps a FRED-init experiment
+  from ever overwriting the plain COCO-init run's checkpoints.
+
+1. Checks for `runs/<run_name>/weights/last.pt` — if found, loads it and
    compares its first-conv channel count (`_first_conv_in_channels()`)
    against `N_CHANNELS`. Only resumes if they match; otherwise prints a
    warning and falls through to step 2 as if no checkpoint existed (guards
    against resuming a stale/incompatible checkpoint — e.g. one left over from
    a different pipeline — which would otherwise crash with a channel-mismatch
    `RuntimeError` on the first batch)
-2. Otherwise loads YOLO v11 nano pretrained weights and patches first layer
+2. Otherwise loads starting weights — `init_from` if given, else YOLO v11
+   nano COCO pretrained weights (`YOLO_MODEL`) — and patches the first layer
+   to `N_CHANNELS` (`patch_yolo_input_channels()` no-ops if the loaded
+   checkpoint already has the right channel count, e.g. loading the 3-channel
+   FRED baseline into a 3-channel run)
 3. Calls `model.train()` with settings from `config.py`, passing
-   `exist_ok=True` so a fresh run reuses the same fixed `runs/fred_4channel/`
+   `exist_ok=True` so a fresh run reuses the same fixed `runs/<run_name>/`
    folder (overwriting any rejected/incompatible checkpoint) instead of
    Ultralytics auto-incrementing to `fred_4channel2/`, which would leave
    `evaluate.py` pointed at the old files
 4. Saves `best.pt` (best mAP50) and `last.pt` (latest epoch) automatically
 5. Also saves a checkpoint every 10 epochs (`save_period=10`)
+
+#### Optional cross-pipeline init — `--init-from`
+
+The 3-channel physics variant (pos/neg polarity + time surface) and the FRED
+baseline (`Fred/`, accumulated event frame) both feed `in_channels=3` into
+YOLO11n, so the FRED baseline's already-trained weights are a drop-in
+alternative starting point to stock COCO — an experiment to see whether
+drone-shape priors learned on event data transfer better than generic COCO
+features. Exposed as CLI flags on the script (parsed in `__main__`, passed
+straight through to `train_with_ultralytics()`):
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--init-from <path>` | `None` (use `YOLO_MODEL`/COCO) | Load this checkpoint's weights as the starting point for a fresh run |
+| `--run-name <name>` | `None` (auto: `RUN_NAME` or `RUN_NAME_from_fred`) | Override the output folder under `runs/` |
+
+```powershell
+DRONE_CHANNELS=3 python train_4ch_yolo.py --init-from ../Fred/runs/fred_baseline_event/weights/best.pt
+# → runs/fred_3channel_from_fred/ — separate from runs/fred_3channel/ (COCO-init)
+```
+
+Both flags are additive/opt-in — omitting `--init-from` reproduces the
+existing COCO-init behavior exactly, for both the 3- and 4-channel variants.
 
 Also passes `cache=CACHE` (`'disk'`, from `config.py`) so Ultralytics decodes
 each 4-channel PNG once and reuses it across epochs instead of re-decoding

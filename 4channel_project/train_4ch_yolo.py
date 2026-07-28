@@ -13,6 +13,7 @@ Usage:
     DRONE_CHANNELS=3 python train_4ch_yolo.py   # drop the rotor channel
 """
 
+import argparse
 import os
 import sys
 import numpy as np
@@ -281,7 +282,7 @@ def _patch_directml(device):
     return _dml_device
 
 
-def train_with_ultralytics():
+def train_with_ultralytics(init_from=None, run_name=None):
     """
     Use Ultralytics YOLO API for training.
 
@@ -291,7 +292,22 @@ def train_with_ultralytics():
     Checkpoints saved after every epoch:
       runs/fred_4channel/weights/best.pt  ← best mAP50 so far
       runs/fred_4channel/weights/last.pt  ← most recent epoch
+
+    Parameters
+    ----------
+    init_from : optional path to a .pt checkpoint to use as the starting
+        weights instead of YOLO_MODEL (COCO). Only takes effect on a fresh
+        start — an existing compatible last.pt checkpoint still takes
+        priority (resume). Only sensible when the checkpoint's channel
+        count matches N_CHANNELS (or is fine being re-patched, same as
+        YOLO_MODEL would be).
+    run_name : optional override for the run's output folder name. Defaults
+        to f"{RUN_NAME}_from_fred" when init_from is given (so it can't
+        collide with the plain RUN_NAME run), otherwise plain RUN_NAME.
     """
+    if run_name is None:
+        run_name = f"{RUN_NAME}_from_fred" if init_from else RUN_NAME
+
     yaml_path = os.path.join(DATASET_DIR, 'dataset.yaml')
     if not os.path.exists(yaml_path):
         print(f"ERROR: dataset.yaml not found at {yaml_path}")
@@ -299,8 +315,8 @@ def train_with_ultralytics():
         return
 
     # ── Check for existing checkpoint ────────────────────────────────────────
-    last_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'last.pt')
-    best_pt = os.path.join(RUNS_DIR, RUN_NAME, 'weights', 'best.pt')
+    last_pt = os.path.join(RUNS_DIR, run_name, 'weights', 'last.pt')
+    best_pt = os.path.join(RUNS_DIR, run_name, 'weights', 'best.pt')
 
     model  = None
     resume = False
@@ -321,8 +337,12 @@ def train_with_ultralytics():
 
     if model is None:
         print("No compatible checkpoint found — starting fresh training...")
-        print(f"Loading base model: {YOLO_MODEL}")
-        model = YOLO(YOLO_MODEL)
+        if init_from:
+            print(f"Loading init weights from: {init_from}")
+            model = YOLO(init_from)
+        else:
+            print(f"Loading base model: {YOLO_MODEL}")
+            model = YOLO(YOLO_MODEL)
         print(f"Patching input to {N_CHANNELS} channels...")
         model = patch_yolo_input_channels(model, N_CHANNELS)
         resume = False
@@ -334,7 +354,7 @@ def train_with_ultralytics():
     print(f"  Device   : {DEVICE}")
     print(f"  Channels : {N_CHANNELS}")
     print(f"  Resume   : {resume}")
-    print(f"  Saves to : {os.path.join(RUNS_DIR, RUN_NAME)}")
+    print(f"  Saves to : {os.path.join(RUNS_DIR, run_name)}")
 
     if DEBUG_MODE:
         # Load one batch to show tensor shapes before training starts
@@ -363,7 +383,7 @@ def train_with_ultralytics():
         cache    = CACHE,      # 'disk' — decode each PNG once, reuse across
                                # epochs instead of re-decoding ~97k images/epoch
         project  = RUNS_DIR,
-        name     = RUN_NAME,
+        name     = run_name,
         exist_ok = True,       # reuse the same fixed run folder instead of
                                # auto-incrementing (fred_4channel2, ...) — the
                                # checkpoint-resume logic above always looks at
@@ -395,6 +415,17 @@ def train_with_ultralytics():
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train YOLO with physics-channel event camera input.")
+    parser.add_argument('--init-from', default=None,
+                         help="Path to a .pt checkpoint to use as starting weights "
+                              "instead of YOLO_MODEL (COCO). E.g. the FRED baseline's "
+                              "Fred/runs/fred_baseline_event/weights/best.pt — valid "
+                              "when its channel count matches N_CHANNELS (3==3).")
+    parser.add_argument('--run-name', default=None,
+                         help="Override the run's output folder name (default: "
+                              "RUN_NAME, or RUN_NAME_from_fred when --init-from is set).")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("FRED 4-Channel YOLO Training")
     print("=" * 60)
@@ -417,4 +448,4 @@ if __name__ == "__main__":
         if not torch.cuda.is_available():
             print("WARNING: CUDA not available — set DRONE_ENV=cpu or install GPU PyTorch")
 
-    train_with_ultralytics()
+    train_with_ultralytics(init_from=args.init_from, run_name=args.run_name)

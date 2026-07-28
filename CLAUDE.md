@@ -230,6 +230,11 @@ worker subprocesses to load unpatched 3-channel images while the model expected
   crashing, and training starts fresh, overwriting the same fixed run folder
   (`exist_ok=True`) rather than auto-incrementing to `fred_4channel2/`
 - imread fix: patches `ultralytics.utils.patches.imread` + `ultralytics.data.base.imread`
+- FRED-init 3-channel experiment (`--init-from`, see Pipeline 3 below): started,
+  manually stopped after 2 epochs (epoch 2 val mAP50 = 72.6%, not a final
+  number — just an early checkpoint). Checkpoint saved at
+  `runs/fred_3channel_from_fred/weights/last.pt`; re-running the same
+  `--init-from` command resumes from it automatically rather than restarting.
 
 ## build_index.py vs build_dataset.py — what's the difference?
 
@@ -382,6 +387,27 @@ $env:KMP_DUPLICATE_LIB_OK="TRUE"
 python 4channel_project/train_4ch_yolo.py
 python 4channel_project/evaluate.py
 ```
+
+#### Optional — initialize 3-channel training from the FRED baseline instead of COCO
+The 3-channel physics variant (pos/neg polarity + time surface) and the FRED
+baseline (`Fred/`, accumulated event frame) both feed `in_channels=3` into
+YOLO11n, so the FRED baseline's trained weights can be used as the starting
+point instead of stock COCO `yolo11n.pt` — an experiment to see whether
+drone-shape priors learned on event data transfer better than generic COCO
+features. `--init-from` is opt-in and additive: omitting it trains exactly as
+before (COCO init, `runs/fred_3channel/`).
+```powershell
+$env:DRONE_CHANNELS="3"
+$env:KMP_DUPLICATE_LIB_OK="TRUE"
+python 4channel_project/train_4ch_yolo.py --init-from Fred/runs/fred_baseline_event/weights/best.pt
+# → writes to runs/fred_3channel_from_fred/ (separate folder — never
+#   overwrites the COCO-init runs/fred_3channel/ run above)
+```
+`--run-name <name>` overrides the output folder name explicitly (default:
+`RUN_NAME`, or `RUN_NAME_from_fred` when `--init-from` is set). Only takes
+effect on a fresh start — resuming from an existing compatible `last.pt`
+checkpoint still takes priority over `--init-from`, same as the normal
+COCO-init resume behavior.
 
 #### Scenario B — zips on Google Drive, download on demand
 ```powershell
